@@ -1,0 +1,459 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Hardened Helpers (Phase 3) ---
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isVerifiedOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'hnan.noppamat@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function workspaceExists(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function isOptionalString(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptionalNumber(data, field, minVal, maxVal) {
+      return !(field in data) || (data[field] is number && data[field] >= minVal && data[field] <= maxVal);
+    }
+
+    // --- Validation Blueprints (Pillar 2) ---
+    function isValidUserWorkspace(data, userId) {
+      return data.keys().hasAll([
+          'uid', 'ownerName', 'roleMode', 'categories',
+          'exchangeRate', 'freightCost', 'splitByQty',
+          'autoSave', 'seeded', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'ownerName', 'roleMode', 'categories',
+          'exchangeRate', 'freightCost', 'splitByQty',
+          'autoSave', 'seeded', 'createdAt', 'updatedAt'
+        ]) &&
+        data.uid is string && data.uid == userId && isValidId(data.uid) &&
+        data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80 &&
+        data.roleMode is string && data.roleMode in ['owner', 'staff'] &&
+        data.categories is list && data.categories.size() <= 40 &&
+        (data.categories.size() == 0 || (data.categories[0] is string && data.categories[0].size() >= 1 && data.categories[0].size() <= 80)) &&
+        data.exchangeRate is number && data.exchangeRate >= 0 && data.exchangeRate <= 1000 &&
+        data.freightCost is number && data.freightCost >= 0 && data.freightCost <= 1000000 &&
+        data.splitByQty is bool &&
+        data.autoSave is bool &&
+        data.seeded is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidProduct(data, userId) {
+      return data.keys().hasAll([
+          'ownerUid', 'name', 'sku', 'origin', 'category',
+          'stock', 'lowThreshold', 'landedCostThb', 'sellPriceThb',
+          'updatedAtLabel', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid', 'name', 'sku', 'origin', 'category',
+          'stock', 'lowThreshold', 'landedCostThb', 'cnyUnitPrice',
+          'freightPerUnitThb', 'sellPriceThb', 'imageUrl', 'colors',
+          'updatedAtLabel', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerUid is string && data.ownerUid == userId && isValidId(data.ownerUid) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.sku is string && data.sku.size() >= 1 && data.sku.size() <= 64 &&
+        data.origin is string && data.origin in ['cn', 'th'] &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        data.stock is number && data.stock >= 0 && data.stock <= 1000000 &&
+        data.lowThreshold is number && data.lowThreshold >= 0 && data.lowThreshold <= 100000 &&
+        data.landedCostThb is number && data.landedCostThb >= 0 && data.landedCostThb <= 10000000 &&
+        isOptionalNumber(data, 'cnyUnitPrice', 0, 1000000) &&
+        isOptionalNumber(data, 'freightPerUnitThb', 0, 1000000) &&
+        data.sellPriceThb is number && data.sellPriceThb >= 0 && data.sellPriceThb <= 10000000 &&
+        isOptionalString(data, 'imageUrl', 150000) &&
+        (!('colors' in data) || (data.colors is list && data.colors.size() <= 20 && (data.colors.size() == 0 || data.colors[0] is map))) &&
+        data.updatedAtLabel is string && data.updatedAtLabel.size() >= 1 && data.updatedAtLabel.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidOrder(data, userId) {
+      return data.keys().hasAll([
+          'ownerUid', 'customerName', 'status',
+          'totalThb', 'createdAtLabel', 'items', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid', 'customerId', 'customerName', 'channel', 'orderType', 'status',
+          'totalThb', 'createdAtLabel', 'shippingOption', 'carrierName',
+          'courier', 'trackingCode',
+          'deliveryMethod', 'deliveryProofImage', 'cashReceivedThb',
+          'deliveryNote', 'deliveryConfirmedAt', 'items',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerUid is string && data.ownerUid == userId && isValidId(data.ownerUid) &&
+        (!('customerId' in data) || isValidId(data.customerId)) &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120 &&
+        isOptionalString(data, 'channel', 60) &&
+        (!('orderType' in data) || (data.orderType is string && data.orderType in ['walk_in', 'delivery'])) &&
+        data.status is string && data.status in ['pending', 'packing', 'ready_to_ship', 'shipped'] &&
+        data.totalThb is number && data.totalThb >= 0 && data.totalThb <= 10000000 &&
+        data.createdAtLabel is string && data.createdAtLabel.size() >= 1 && data.createdAtLabel.size() <= 60 &&
+        (!('shippingOption' in data) || (data.shippingOption is string && data.shippingOption in ['store_delivery', 'carrier', 'store_pickup'])) &&
+        isOptionalString(data, 'carrierName', 80) &&
+        (!('courier' in data) || (data.courier is string && data.courier in ['Flash Express', 'J&T Express', 'Kerry Express', 'ไปรษณีย์ไทย'])) &&
+        isOptionalString(data, 'trackingCode', 64) &&
+        (!('deliveryMethod' in data) || (data.deliveryMethod is string && data.deliveryMethod in ['photo_proof', 'cash'])) &&
+        isOptionalString(data, 'deliveryProofImage', 150000) &&
+        isOptionalNumber(data, 'cashReceivedThb', 0, 10000000) &&
+        isOptionalString(data, 'deliveryNote', 500) &&
+        isOptionalString(data, 'deliveryConfirmedAt', 60) &&
+        data.items is list && data.items.size() >= 1 && data.items.size() <= 50 && data.items[0] is map &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStockApproval(data, userId) {
+      return data.keys().hasAll([
+          'ownerUid', 'productId', 'productName', 'sku',
+          'requestedBy', 'currentStock', 'requestedStock',
+          'reason', 'createdAtLabel', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid', 'productId', 'productName', 'sku',
+          'requestedBy', 'currentStock', 'requestedStock',
+          'reason', 'createdAtLabel', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerUid is string && data.ownerUid == userId && isValidId(data.ownerUid) &&
+        data.productId is string && isValidId(data.productId) &&
+        data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 160 &&
+        data.sku is string && data.sku.size() >= 1 && data.sku.size() <= 64 &&
+        data.requestedBy is string && data.requestedBy.size() >= 1 && data.requestedBy.size() <= 80 &&
+        data.currentStock is number && data.currentStock >= 0 && data.currentStock <= 1000000 &&
+        data.requestedStock is number && data.requestedStock >= 0 && data.requestedStock <= 1000000 &&
+        data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 300 &&
+        data.createdAtLabel is string && data.createdAtLabel.size() >= 1 && data.createdAtLabel.size() <= 60 &&
+        data.status is string && data.status in ['pending', 'approved', 'rejected'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data, userId) {
+      return data.keys().hasAll([
+          'ownerUid', 'title', 'detail', 'timeLabel',
+          'type', 'read', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid', 'title', 'detail', 'timeLabel',
+          'type', 'read', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerUid is string && data.ownerUid == userId && isValidId(data.ownerUid) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.detail is string && data.detail.size() >= 1 && data.detail.size() <= 300 &&
+        data.timeLabel is string && data.timeLabel.size() >= 1 && data.timeLabel.size() <= 60 &&
+        data.type is string && data.type in ['order', 'stock', 'approval', 'system'] &&
+        data.read is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCustomer(data, userId) {
+      return data.keys().hasAll([
+          'ownerUid', 'name', 'createdAtLabel', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid', 'name', 'phone', 'lineId', 'email',
+          'address', 'note', 'createdAtLabel', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerUid is string && data.ownerUid == userId && isValidId(data.ownerUid) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        isOptionalString(data, 'phone', 40) &&
+        isOptionalString(data, 'lineId', 80) &&
+        isOptionalString(data, 'email', 120) &&
+        isOptionalString(data, 'address', 400) &&
+        isOptionalString(data, 'note', 500) &&
+        data.createdAtLabel is string && data.createdAtLabel.size() >= 1 && data.createdAtLabel.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // --- Admin Records ---
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && request.auth.uid == adminId;
+      allow list, create, update, delete: if false;
+    }
+
+    // --- User Store Workspace ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if false;
+      allow create: if isSignedIn() &&
+        isValidId(userId) &&
+        request.auth.uid == userId &&
+        isValidUserWorkspace(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() &&
+        isValidId(userId) &&
+        isValidUserWorkspace(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() || (
+            request.auth.uid == userId &&
+            // Action: Update workspace settings
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'ownerName', 'roleMode', 'categories',
+              'exchangeRate', 'freightCost', 'splitByQty',
+              'autoSave', 'seeded', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+
+      // --- Products Subcollection ---
+      match /products/{productId} {
+        allow get: if isSignedIn() &&
+          isValidId(userId) && isValidId(productId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+        allow list: if isVerifiedOwner(userId) && existing().ownerUid == request.auth.uid;
+        allow create: if isSignedIn() &&
+          isValidId(userId) && isValidId(productId) &&
+          request.auth.uid == userId &&
+          isValidProduct(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          workspaceExists(userId);
+        allow update: if isSignedIn() &&
+          isValidId(userId) && isValidId(productId) &&
+          isValidProduct(incoming(), userId) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isAdmin() || (
+              request.auth.uid == userId &&
+              // Action: Update stock, pricing, or product metadata
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'category', 'stock', 'lowThreshold',
+                'landedCostThb', 'cnyUnitPrice', 'freightPerUnitThb',
+                'sellPriceThb', 'imageUrl', 'colors', 'updatedAtLabel', 'updatedAt'
+              ]) &&
+              workspaceExists(userId)
+            )
+          );
+        allow delete: if isSignedIn() &&
+          isValidId(userId) && isValidId(productId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+      }
+
+      // --- Orders Subcollection ---
+      match /orders/{orderId} {
+        allow get: if isSignedIn() &&
+          isValidId(userId) && isValidId(orderId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+        allow list: if isVerifiedOwner(userId) && existing().ownerUid == request.auth.uid;
+        allow create: if isSignedIn() &&
+          isValidId(userId) && isValidId(orderId) &&
+          request.auth.uid == userId &&
+          isValidOrder(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          workspaceExists(userId) &&
+          (!('customerId' in incoming()) || exists(/databases/$(database)/documents/users/$(userId)/customers/$(incoming().customerId)));
+        allow update: if isSignedIn() &&
+          isValidId(userId) && isValidId(orderId) &&
+          isValidOrder(incoming(), userId) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isAdmin() || (
+              request.auth.uid == userId && (
+                // Action: Toggle picked items before shipment
+                (
+                  existing().status != 'shipped' &&
+                  incoming().status == existing().status &&
+                  incoming().diff(existing()).affectedKeys().hasOnly(['items', 'updatedAt'])
+                ) ||
+                // Action: Pack pending order
+                (
+                  existing().status == 'pending' &&
+                  incoming().status == 'packing' &&
+                  incoming().diff(existing()).affectedKeys().hasOnly(['status', 'items', 'updatedAt'])
+                ) ||
+                // Action: Mark packed order ready to ship
+                (
+                  existing().status == 'packing' &&
+                  incoming().status == 'ready_to_ship' &&
+                  incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                ) ||
+                // Action: Update shipping option while ready to ship
+                (
+                  existing().status == 'ready_to_ship' &&
+                  incoming().status == 'ready_to_ship' &&
+                  incoming().diff(existing()).affectedKeys().hasOnly([
+                    'shippingOption', 'carrierName', 'courier', 'trackingCode', 'updatedAt'
+                  ])
+                ) ||
+                // Action: Confirm shipment (store delivery, carrier with carrier name, or store pickup)
+                (
+                  existing().status == 'ready_to_ship' &&
+                  incoming().status == 'shipped' &&
+                  incoming().diff(existing()).affectedKeys().hasOnly([
+                    'status', 'shippingOption', 'carrierName', 'courier', 'trackingCode', 'updatedAt'
+                  ])
+                ) ||
+                // Action: Record delivery confirmation photo / cash payment / deliveryNote (terminal-locked once confirmed)
+                (
+                  existing().status == 'shipped' &&
+                  incoming().status == 'shipped' &&
+                  !('deliveryConfirmedAt' in existing()) &&
+                  ('deliveryConfirmedAt' in incoming()) &&
+                  incoming().diff(existing()).affectedKeys().hasOnly([
+                    'deliveryMethod', 'deliveryProofImage', 'cashReceivedThb',
+                    'deliveryNote', 'deliveryConfirmedAt', 'updatedAt'
+                  ])
+                )
+              ) &&
+              workspaceExists(userId)
+            )
+          );
+        allow delete: if isSignedIn() &&
+          isValidId(userId) && isValidId(orderId) &&
+          isAdmin() &&
+          workspaceExists(userId);
+      }
+
+      // --- Stock Approvals Subcollection ---
+      match /approvals/{approvalId} {
+        allow get: if isSignedIn() &&
+          isValidId(userId) && isValidId(approvalId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+        allow list: if isVerifiedOwner(userId) && existing().ownerUid == request.auth.uid;
+        allow create: if isSignedIn() &&
+          isValidId(userId) && isValidId(approvalId) &&
+          request.auth.uid == userId &&
+          isValidStockApproval(incoming(), userId) &&
+          incoming().status == 'pending' &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          workspaceExists(userId) &&
+          exists(/databases/$(database)/documents/users/$(userId)/products/$(incoming().productId));
+        allow update: if isSignedIn() &&
+          isValidId(userId) && isValidId(approvalId) &&
+          isValidStockApproval(incoming(), userId) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().productId == existing().productId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isAdmin() || (
+              request.auth.uid == userId &&
+              // Action: Approve or reject pending stock request (terminal state locked once resolved)
+              existing().status == 'pending' &&
+              incoming().status in ['approved', 'rejected'] &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+              workspaceExists(userId)
+            )
+          );
+        allow delete: if false;
+      }
+
+      // --- Notifications Subcollection ---
+      match /notifications/{notificationId} {
+        allow get: if isSignedIn() &&
+          isValidId(userId) && isValidId(notificationId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+        allow list: if isVerifiedOwner(userId) && existing().ownerUid == request.auth.uid;
+        allow create: if isSignedIn() &&
+          isValidId(userId) && isValidId(notificationId) &&
+          request.auth.uid == userId &&
+          isValidNotification(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          workspaceExists(userId);
+        allow update: if isSignedIn() &&
+          isValidId(userId) && isValidId(notificationId) &&
+          isValidNotification(incoming(), userId) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isAdmin() || (
+              request.auth.uid == userId &&
+              // Action: Mark notification read
+              incoming().read == true &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt']) &&
+              workspaceExists(userId)
+            )
+          );
+        allow delete: if isSignedIn() &&
+          isValidId(userId) && isValidId(notificationId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+      }
+
+      // --- Customers Subcollection (PII strictly isolated to verified owner / admin) ---
+      match /customers/{customerId} {
+        allow get: if isSignedIn() &&
+          isValidId(userId) && isValidId(customerId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+        allow list: if isVerifiedOwner(userId) && existing().ownerUid == request.auth.uid;
+        allow create: if isSignedIn() &&
+          isValidId(userId) && isValidId(customerId) &&
+          request.auth.uid == userId &&
+          isValidCustomer(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          workspaceExists(userId);
+        allow update: if isSignedIn() &&
+          isValidId(userId) && isValidId(customerId) &&
+          isValidCustomer(incoming(), userId) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isAdmin() || (
+              request.auth.uid == userId &&
+              // Action: Update customer contact details and notes
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'phone', 'lineId', 'email', 'address', 'note', 'updatedAt'
+              ]) &&
+              workspaceExists(userId)
+            )
+          );
+        allow delete: if isSignedIn() &&
+          isValidId(userId) && isValidId(customerId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+      }
+    }
+  }
+}

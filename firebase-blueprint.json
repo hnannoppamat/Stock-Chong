@@ -1,0 +1,559 @@
+{
+  "entities": {
+    "UserWorkspace": {
+      "title": "UserWorkspace",
+      "description": "Authenticated store user's workspace settings, role mode, exchange rate, freight cost, and product categories.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the workspace owner."
+        },
+        "ownerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name of the store owner."
+        },
+        "roleMode": {
+          "type": "string",
+          "enum": ["owner", "staff"],
+          "description": "Active UI role mode."
+        },
+        "categories": {
+          "type": "array",
+          "description": "List of product category names (max 40)."
+        },
+        "exchangeRate": {
+          "type": "number",
+          "description": "CNY to THB exchange rate."
+        },
+        "freightCost": {
+          "type": "number",
+          "description": "Import freight cost in THB."
+        },
+        "splitByQty": {
+          "type": "boolean",
+          "description": "Whether freight cost is split by item quantity."
+        },
+        "autoSave": {
+          "type": "boolean",
+          "description": "Whether auto-save is enabled."
+        },
+        "seeded": {
+          "type": "boolean",
+          "description": "Whether initial sample store data has been seeded."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when workspace was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when workspace was last updated."
+        }
+      },
+      "required": [
+        "uid",
+        "ownerName",
+        "roleMode",
+        "categories",
+        "exchangeRate",
+        "freightCost",
+        "splitByQty",
+        "autoSave",
+        "seeded",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product record owned by a store workspace.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the workspace owner."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "Product name."
+        },
+        "sku": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Stock keeping unit code."
+        },
+        "origin": {
+          "type": "string",
+          "enum": ["cn", "th"],
+          "description": "Product source origin."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Product category."
+        },
+        "stock": {
+          "type": "number",
+          "description": "Current stock quantity."
+        },
+        "lowThreshold": {
+          "type": "number",
+          "description": "Low-stock alert threshold."
+        },
+        "landedCostThb": {
+          "type": "number",
+          "description": "Landed unit cost in THB."
+        },
+        "cnyUnitPrice": {
+          "type": "number",
+          "description": "Optional CNY unit price."
+        },
+        "freightPerUnitThb": {
+          "type": "number",
+          "description": "Optional freight cost per unit in THB."
+        },
+        "sellPriceThb": {
+          "type": "number",
+          "description": "Selling price in THB."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 150000,
+          "description": "Optional product image URL or compact thumbnail data URI."
+        },
+        "colors": {
+          "type": "array",
+          "description": "Optional bounded list of product color variants (max 20), each with name, hex, and optional imageUrl."
+        },
+        "updatedAtLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Human-readable update time label."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when last updated."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "name",
+        "sku",
+        "origin",
+        "category",
+        "stock",
+        "lowThreshold",
+        "landedCostThb",
+        "sellPriceThb",
+        "updatedAtLabel",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order with status workflow, courier tracking, delivery proof photo, cash payment details, and delivery note.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the workspace owner."
+        },
+        "customerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Optional linked customer document ID."
+        },
+        "customerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Customer display name."
+        },
+        "channel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Sales channel."
+        },
+        "orderType": {
+          "type": "string",
+          "enum": ["walk_in", "delivery"],
+          "description": "Order type selected on creation: walk-in or delivery."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "packing", "ready_to_ship", "shipped"],
+          "description": "Order fulfillment status."
+        },
+        "totalThb": {
+          "type": "number",
+          "description": "Order total in THB."
+        },
+        "createdAtLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Display time label for order creation."
+        },
+        "shippingOption": {
+          "type": "string",
+          "enum": ["store_delivery", "carrier", "store_pickup"],
+          "description": "Fulfillment option chosen in ready-to-ship state: store delivery, carrier shipping, or store pickup."
+        },
+        "carrierName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Specified shipping carrier name when shippingOption is carrier."
+        },
+        "courier": {
+          "type": "string",
+          "enum": ["Flash Express", "J&T Express", "Kerry Express", "ไปรษณีย์ไทย"],
+          "description": "Assigned courier company."
+        },
+        "trackingCode": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Shipment tracking code."
+        },
+        "deliveryMethod": {
+          "type": "string",
+          "enum": ["photo_proof", "cash"],
+          "description": "Delivery confirmation method."
+        },
+        "deliveryProofImage": {
+          "type": "string",
+          "maxLength": 150000,
+          "description": "Optional compressed delivery proof thumbnail data URI."
+        },
+        "cashReceivedThb": {
+          "type": "number",
+          "description": "Optional cash received amount in THB."
+        },
+        "deliveryNote": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional delivery confirmation note (e.g., gate code, left at reception)."
+        },
+        "deliveryConfirmedAt": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Display time label when delivery was confirmed."
+        },
+        "items": {
+          "type": "array",
+          "description": "Bounded list of order line items (1 to 50)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when order was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when order was last updated."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "customerName",
+        "status",
+        "totalThb",
+        "createdAtLabel",
+        "items",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StockApproval": {
+      "title": "StockApproval",
+      "description": "Staff request to adjust inventory stock, awaiting owner approval.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the workspace owner."
+        },
+        "productId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Referenced product document ID."
+        },
+        "productName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "Product display name."
+        },
+        "sku": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Product SKU."
+        },
+        "requestedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Staff label who requested stock adjustment."
+        },
+        "currentStock": {
+          "type": "number",
+          "description": "Stock quantity before adjustment."
+        },
+        "requestedStock": {
+          "type": "number",
+          "description": "Requested new stock quantity."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Reason for stock adjustment."
+        },
+        "createdAtLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Display timestamp label."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Approval request status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when updated."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "productId",
+        "productName",
+        "sku",
+        "requestedBy",
+        "currentStock",
+        "requestedStock",
+        "reason",
+        "createdAtLabel",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "In-app notification record for a store workspace.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the workspace owner."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Notification title."
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Notification detail text."
+        },
+        "timeLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Display time label."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["order", "stock", "approval", "system"],
+          "description": "Notification category."
+        },
+        "read": {
+          "type": "boolean",
+          "description": "Whether the notification has been read."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when updated."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "title",
+        "detail",
+        "timeLabel",
+        "type",
+        "read",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer profile with contact details, delivery address, and notes belonging to a store workspace.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the workspace owner."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Customer full name or shop name."
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Optional customer phone number."
+        },
+        "lineId": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Optional customer LINE ID or social handle."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Optional customer email address."
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Optional customer shipping or contact address."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional customer notes or preferences."
+        },
+        "createdAtLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Display date label when customer was added."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when customer was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when customer was last updated."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "name",
+        "createdAtLabel",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Server-managed administrator role record.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Admin Firebase Auth UID."
+        }
+      },
+      "required": ["uid"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserWorkspace" },
+      "description": "Authenticated user's store workspace configuration."
+    },
+    "/users/{userId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Inventory products belonging to a user's store workspace."
+    },
+    "/users/{userId}/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Customer orders and delivery confirmations belonging to a user's store workspace."
+    },
+    "/users/{userId}/approvals/{approvalId}": {
+      "schema": { "$ref": "#/entities/StockApproval" },
+      "description": "Stock adjustment approval requests belonging to a user's store workspace."
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/AppNotification" },
+      "description": "Store notifications belonging to a user's store workspace."
+    },
+    "/users/{userId}/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Customer profiles and contact information belonging to a user's store workspace."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Read-only admin role records."
+    }
+  }
+}

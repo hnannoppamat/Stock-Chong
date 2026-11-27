@@ -1,0 +1,6 @@
+{
+  "name": "StockFlow TH-CN",
+  "description": "ระบบจัดการสต็อกนำเข้าจีน-ไทย สแกนบิล AI แปลงต้นทุน และจัดการออเดอร์ครบวงจร",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
