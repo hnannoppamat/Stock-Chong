@@ -10,6 +10,8 @@ interface HeaderProps {
   onOpenAiChat: () => void;
   isAiChatOpen: boolean;
   lowStockProducts: ProductItem[];
+  ownerLineId: string;
+  onNotifyLowStockLine: (products: ProductItem[]) => void;
   onSelectLowStockProduct: (product: ProductItem) => void;
   notifications: AppNotification[];
   onMarkAllRead: () => void;
@@ -25,6 +27,8 @@ export function Header({
   onOpenAiChat,
   isAiChatOpen,
   lowStockProducts,
+  ownerLineId,
+  onNotifyLowStockLine,
   onSelectLowStockProduct,
   notifications,
   onMarkAllRead,
@@ -224,16 +228,31 @@ export function Header({
                         สินค้าต่ำกว่าเกณฑ์ต้องสั่งเติม ({lowStockProducts.length} รายการ)
                       </span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTabChange("inventory");
-                        setOpenNoti(false);
-                      }}
-                      className="text-[11px] font-semibold text-primary hover:underline cursor-pointer"
-                    >
-                      ดูทั้งหมด
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onNotifyLowStockLine(lowStockProducts);
+                          setOpenNoti(false);
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-[#06C755] hover:bg-[#05b34c] text-white text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">
+                          chat
+                        </span>
+                        <span>แจ้ง LINE</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onTabChange("inventory");
+                          setOpenNoti(false);
+                        }}
+                        className="text-[11px] font-semibold text-primary hover:underline cursor-pointer"
+                      >
+                        ดูทั้งหมด
+                      </button>
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
                     {lowStockProducts.map((prod) => (

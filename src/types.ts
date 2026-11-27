@@ -115,6 +115,7 @@ export interface StockApprovalRequest {
   reason: string;
   createdAt: string;
   status: "pending" | "approved" | "rejected";
+  notifiedLineId?: string;
 }
 
 export interface AppNotification {

@@ -7,6 +7,9 @@ interface OwnerAuthViewProps {
   onUpdateOwnerName: (name: string) => void;
   ownerPin: string;
   onChangeOwnerPin: (newPin: string) => void;
+  ownerLineId: string;
+  onUpdateOwnerLineId: (lineId: string) => void;
+  onTestLineAutoNotify: () => void;
   pendingCount: number;
   packingCount: number;
   readyToShipCount: number;
@@ -26,6 +29,9 @@ export function OwnerAuthView({
   onUpdateOwnerName,
   ownerPin,
   onChangeOwnerPin,
+  ownerLineId,
+  onUpdateOwnerLineId,
+  onTestLineAutoNotify,
   pendingCount,
   packingCount,
   readyToShipCount,
@@ -42,6 +48,8 @@ export function OwnerAuthView({
   const [selectedTab, setSelectedTab] = useState<RoleMode>("owner");
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(ownerName);
+  const [isEditingLineId, setIsEditingLineId] = useState(false);
+  const [lineIdDraft, setLineIdDraft] = useState(ownerLineId);
 
   const [pinInput, setPinInput] = useState("");
   const [pinStatus, setPinStatus] = useState(
@@ -523,6 +531,71 @@ export function OwnerAuthView({
                   )}
                 </div>
 
+                {/* Owner LINE ID Notification Target Setting */}
+                <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="material-symbols-outlined text-[17px] text-[#059642] shrink-0">
+                        chat
+                      </span>
+                      <span className="text-[13px] font-semibold text-on-surface truncate">
+                        LINE แจ้งเตือนอัตโนมัติ:{" "}
+                        <span className="text-[#059642] font-bold">
+                          {ownerLineId}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={onTestLineAutoNotify}
+                        className="px-2.5 py-1 rounded-lg bg-[#06C755] text-white text-[11px] font-semibold hover:bg-[#05b34c] transition-colors cursor-pointer"
+                      >
+                        ทดสอบส่ง
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLineIdDraft(ownerLineId);
+                          setIsEditingLineId((prev) => !prev);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-[#06C755]/15 text-[#059642] text-[11px] font-semibold hover:bg-[#06C755] hover:text-white transition-colors cursor-pointer"
+                      >
+                        {isEditingLineId ? "ปิด" : "เปลี่ยน LINE ID"}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                    ส่งแจ้งเตือนอัตโนมัติผ่าน API/Webhook ทุกครั้งที่มีออเดอร์ใหม่ อนุมัติแก้ไขสต็อก คำขอปรับสต็อก และสินค้าใกล้หมด
+                  </p>
+                  {isEditingLineId && (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const cleaned = lineIdDraft.trim();
+                        if (!cleaned) return;
+                        onUpdateOwnerLineId(cleaned);
+                        setIsEditingLineId(false);
+                      }}
+                      className="flex items-center gap-2 pt-1 border-t border-outline-variant/25"
+                    >
+                      <input
+                        type="text"
+                        value={lineIdDraft}
+                        onChange={(e) => setLineIdDraft(e.target.value)}
+                        placeholder="เช่น Hnan145"
+                        className="flex-1 h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-medium text-on-surface focus:outline-none focus:border-primary"
+                      />
+                      <button
+                        type="submit"
+                        className="h-9 px-3 rounded-lg bg-[#06C755] text-white text-[12px] font-semibold cursor-pointer hover:bg-[#05b34c]"
+                      >
+                        บันทึก
+                      </button>
+                    </form>
+                  )}
+                </div>
+
                 {/* Pending Stock Approvals from Staff */}
                 <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2">
                   <div className="flex items-center justify-between">
@@ -549,8 +622,13 @@ export function OwnerAuthView({
                             <p className="text-[13px] font-semibold text-on-surface">
                               {req.productName} ({req.sku})
                             </p>
-                            <p className="text-[11px] text-on-surface-variant">
-                              {req.requestedBy} · {req.createdAt}
+                            <p className="text-[11px] text-on-surface-variant flex items-center gap-1.5 flex-wrap">
+                              <span>
+                                {req.requestedBy} · {req.createdAt}
+                              </span>
+                              <span className="px-1.5 py-0.2 rounded bg-[#06C755]/15 text-[#059642] text-[10px] font-semibold">
+                                LINE: {req.notifiedLineId || ownerLineId}
+                              </span>
                             </p>
                           </div>
                           <span className="text-[12px] font-semibold text-primary tabular-nums shrink-0">

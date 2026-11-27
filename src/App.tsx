@@ -10,6 +10,7 @@ import {
   CreateOrderModal,
   DeliveryConfirmModal,
   EditProductModal,
+  LowStockLineAlertModal,
   PrintLabelModal,
 } from "./components/Modals";
 import { OrdersView } from "./components/OrdersView";
@@ -41,14 +42,23 @@ import {
   StockApprovalRequest,
   TabId,
 } from "./types";
+import {
+  AutoLineEventType,
+  buildLowStockLineMessage,
+  buildNewOrderLineMessage,
+  buildStockApprovedLineMessage,
+  sendAutomaticLineNotification,
+} from "./utils/lineAlert";
 
 const DEFAULT_OWNER_NAME = "คุณธนวัฒน์";
 const DEFAULT_OWNER_PIN = "4145";
+const DEFAULT_OWNER_LINE_ID = "Hnan145";
 const STORAGE_KEY = "denewstock_store_v1";
 
 interface PersistedStore {
   ownerName: string;
   ownerPin: string;
+  ownerLineId: string;
   categories: string[];
   products: ProductItem[];
   orders: Order[];
@@ -72,6 +82,7 @@ function loadInitialStore(): PersistedStore {
   const defaults: PersistedStore = {
     ownerName: DEFAULT_OWNER_NAME,
     ownerPin: DEFAULT_OWNER_PIN,
+    ownerLineId: DEFAULT_OWNER_LINE_ID,
     categories: INITIAL_CATEGORIES,
     products: INITIAL_PRODUCTS,
     orders: INITIAL_ORDERS,
@@ -98,12 +109,18 @@ function loadInitialStore(): PersistedStore {
         ? parsed.ownerPin
         : DEFAULT_OWNER_PIN;
 
+    const ownerLineId =
+      typeof parsed.ownerLineId === "string" && parsed.ownerLineId.trim()
+        ? parsed.ownerLineId.trim()
+        : DEFAULT_OWNER_LINE_ID;
+
     return {
       ownerName:
         typeof parsed.ownerName === "string" && parsed.ownerName.trim()
           ? parsed.ownerName.trim()
           : DEFAULT_OWNER_NAME,
       ownerPin,
+      ownerLineId,
       categories,
       products: Array.isArray(parsed.products)
         ? parsed.products
@@ -149,6 +166,9 @@ export default function App() {
   const [role, setRole] = useState<RoleMode>("staff");
   const [ownerName, setOwnerName] = useState<string>(initialStore.ownerName);
   const [ownerPin, setOwnerPin] = useState<string>(initialStore.ownerPin);
+  const [ownerLineId, setOwnerLineId] = useState<string>(
+    initialStore.ownerLineId
+  );
   const [products, setProducts] = useState<ProductItem[]>(
     initialStore.products
   );
@@ -192,6 +212,10 @@ export default function App() {
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
   const [confirmingDeliveryOrder, setConfirmingDeliveryOrder] =
     useState<Order | null>(null);
+  const [lowStockLineAlert, setLowStockLineAlert] = useState<{
+    products: ProductItem[];
+    triggerContext?: string;
+  } | null>(null);
   const [aiChatOpen, setAiChatOpen] = useState(false);
 
   const [toast, setToast] = useState<{
@@ -216,6 +240,7 @@ export default function App() {
       const payload: PersistedStore = {
         ownerName,
         ownerPin,
+        ownerLineId,
         categories,
         products,
         orders,
@@ -235,6 +260,7 @@ export default function App() {
   }, [
     ownerName,
     ownerPin,
+    ownerLineId,
     categories,
     products,
     orders,
@@ -481,28 +507,130 @@ export default function App() {
     showToast(`เพิ่มหมวดหมู่ "${categoryName}" แล้ว`, "category");
   };
 
+  const dispatchAutoLineAlert = async (
+    eventType: AutoLineEventType,
+    message: string,
+    metadata?: Record<string, string | number | boolean>,
+    showFeedbackOnUnconfigured = false
+  ) => {
+    const result = await sendAutomaticLineNotification({
+      eventType,
+      targetLineId: ownerLineId,
+      message,
+      metadata,
+    });
+    if (result.delivered) {
+      showToast(
+        `ส่งแจ้งเตือนอัตโนมัติไปยัง LINE (${ownerLineId}) แล้ว`,
+        "notifications_active"
+      );
+    } else if (showFeedbackOnUnconfigured) {
+      if (!result.configured) {
+        showToast(
+          "ยังไม่ได้ตั้งค่า LINE API/Webhook ใน Secrets — พร้อมส่งผ่านปุ่ม LINE ในแอป",
+          "info"
+        );
+      } else {
+        showToast(
+          result.error || "ไม่สามารถส่งแจ้งเตือนไปยัง LINE API ได้",
+          "error"
+        );
+      }
+    }
+  };
+
+  const openLowStockLineAlert = (
+    items: ProductItem[],
+    triggerContext?: string,
+    recordNotification = false
+  ) => {
+    if (items.length === 0) return;
+    if (recordNotification) {
+      pushNotification(
+        `แจ้งเตือนสินค้าใกล้หมด (LINE: ${ownerLineId})`,
+        items
+          .map((p) => `${p.name} เหลือ ${p.stock}/${p.lowThreshold} ชิ้น`)
+          .join(", "),
+        "stock"
+      );
+      void dispatchAutoLineAlert(
+        "low_stock",
+        buildLowStockLineMessage(items, ownerLineId, triggerContext),
+        { count: items.length, triggerContext: triggerContext || "" }
+      );
+    }
+    setLowStockLineAlert({ products: items, triggerContext });
+  };
+
   const handleUpdateProductOwner = (updated: ProductItem) => {
+    const previous = products.find((p) => p.id === updated.id);
+    const updatedItem: ProductItem = {
+      ...(previous || updated),
+      name: updated.name,
+      sku: updated.sku,
+      category: updated.category,
+      lowThreshold: updated.lowThreshold,
+      stock: updated.stock,
+      sellPriceThb: updated.sellPriceThb,
+      landedCostThb: updated.landedCostThb,
+      updatedAt: "เมื่อสักครู่",
+    };
+
+    setProducts((prev) =>
+      prev.map((p) => (p.id === updated.id ? updatedItem : p))
+    );
+    showToast(`บันทึกการแก้ไขสินค้า "${updated.name}" เรียบร้อยแล้ว`, "save");
+
+    if (
+      updatedItem.stock < updatedItem.lowThreshold &&
+      (!previous || updatedItem.stock < previous.stock)
+    ) {
+      openLowStockLineAlert([updatedItem], "หลังแก้ไขสต็อกสินค้า", true);
+    }
+  };
+
+  const handleUpdateProductDetails = (
+    updated: Pick<
+      ProductItem,
+      "id" | "name" | "sku" | "category" | "sellPriceThb" | "lowThreshold"
+    >
+  ) => {
     setProducts((prev) =>
       prev.map((p) =>
         p.id === updated.id
           ? {
               ...p,
-              stock: updated.stock,
+              name: updated.name,
+              sku: updated.sku,
+              category: updated.category,
               sellPriceThb: updated.sellPriceThb,
-              landedCostThb: updated.landedCostThb,
+              lowThreshold: updated.lowThreshold,
               updatedAt: "เมื่อสักครู่",
             }
           : p
       )
     );
-    showToast(`อัปเดตสต็อก ${updated.name} เป็น ${updated.stock} ชิ้น`, "save");
+    setEditingProduct((prev) =>
+      prev && prev.id === updated.id
+        ? {
+            ...prev,
+            name: updated.name,
+            sku: updated.sku,
+            category: updated.category,
+            sellPriceThb: updated.sellPriceThb,
+            lowThreshold: updated.lowThreshold,
+            updatedAt: "เมื่อสักครู่",
+          }
+        : prev
+    );
+    showToast(`อัปเดตข้อมูลสินค้า "${updated.name}" แล้ว`, "save");
   };
 
   const handleRequestStockChange = (
     product: ProductItem,
     requestedStock: number,
     reason: string
-  ) => {
+  ): StockApprovalRequest => {
     const req: StockApprovalRequest = {
       id: `REQ-${Date.now().toString().slice(-5)}`,
       productId: product.id,
@@ -517,14 +645,36 @@ export default function App() {
         minute: "2-digit",
       }),
       status: "pending",
+      notifiedLineId: ownerLineId,
     };
     setApprovals((prev) => [req, ...prev]);
     pushNotification(
-      "คำขออนุมัติปรับสต็อกใหม่",
-      `${product.sku}: ขอปรับ ${product.stock} → ${requestedStock} ชิ้น`,
+      `คำขออนุญาตแก้ไขสต็อก (แจ้ง LINE: ${ownerLineId})`,
+      `${product.name} (${product.sku}): ขอปรับ ${product.stock} → ${requestedStock} ชิ้น`,
       "approval"
     );
-    showToast("ส่งคำขออนุมัติไปยังเจ้าของร้านแล้ว", "send");
+    showToast(
+      `ส่งคำขออนุญาตไปที่เจ้าของร้าน (LINE: ${ownerLineId}) แล้ว`,
+      "send"
+    );
+    void dispatchAutoLineAlert(
+      "stock_request",
+      [
+        "📦 [DenewStock] ขออนุญาตแก้ไขจำนวนสต็อก",
+        `รหัสคำขอ: #${req.id}`,
+        `สินค้า: ${req.productName} (${req.sku})`,
+        `สต็อกเดิม: ${req.currentStock} → ขอปรับเป็น: ${req.requestedStock} ชิ้น`,
+        `เหตุผล: ${req.reason}`,
+        `แจ้งเตือนถึง LINE ID: ${ownerLineId}`,
+      ].join("\n"),
+      {
+        requestId: req.id,
+        sku: req.sku,
+        currentStock: req.currentStock,
+        requestedStock: req.requestedStock,
+      }
+    );
+    return req;
   };
 
   const handleApproveStockRequest = (reqId: string, approve: boolean) => {
@@ -540,6 +690,15 @@ export default function App() {
     );
 
     if (approve) {
+      const targetProduct = products.find((p) => p.id === target.productId);
+      const updatedProduct: ProductItem | null = targetProduct
+        ? {
+            ...targetProduct,
+            stock: target.requestedStock,
+            updatedAt: "เมื่อสักครู่",
+          }
+        : null;
+
       setProducts((prev) =>
         prev.map((p) =>
           p.id === target.productId
@@ -555,6 +714,32 @@ export default function App() {
         `อนุมัติปรับสต็อก ${target.sku} เป็น ${target.requestedStock} ชิ้นแล้ว`,
         "check_circle"
       );
+
+      // Automatically push approval alert via LINE API / Webhook to Hnan145
+      void dispatchAutoLineAlert(
+        "stock_approved",
+        buildStockApprovedLineMessage(target, ownerLineId, ownerName),
+        {
+          requestId: target.id,
+          sku: target.sku,
+          currentStock: target.currentStock,
+          requestedStock: target.requestedStock,
+          approvedBy: ownerName,
+        }
+      );
+
+      if (
+        updatedProduct &&
+        targetProduct &&
+        updatedProduct.stock < updatedProduct.lowThreshold &&
+        updatedProduct.stock < targetProduct.stock
+      ) {
+        openLowStockLineAlert(
+          [updatedProduct],
+          `หลังอนุมัติปรับสต็อก #${reqId}`,
+          true
+        );
+      }
     } else {
       showToast(`ปฏิเสธคำขอปรับสต็อก ${target.sku} แล้ว`, "cancel");
     }
@@ -602,26 +787,45 @@ export default function App() {
       deductionsByProduct.set(prod.id, entry);
     });
 
-    setProducts((prev) =>
-      prev.map((prod) => {
-        const deduction = deductionsByProduct.get(prod.id);
-        if (!deduction) return prod;
-        const nextStock = Math.max(0, prod.stock - deduction.totalQty);
-        const updatedColors = prod.colors?.map((c) => {
-          const colorDeduct = deduction.byColor.get(c.name) ?? 0;
-          if (colorDeduct > 0 && typeof c.stock === "number") {
-            return { ...c, stock: Math.max(0, c.stock - colorDeduct) };
-          }
-          return c;
-        });
-        return {
-          ...prod,
-          stock: nextStock,
-          ...(updatedColors ? { colors: updatedColors } : {}),
-          updatedAt: "ตัดสต็อกอัตโนมัติ",
-        };
-      })
-    );
+    const newlyLowProducts: ProductItem[] = [];
+    const nextProducts = products.map((prod) => {
+      const deduction = deductionsByProduct.get(prod.id);
+      if (!deduction) return prod;
+      const nextStock = Math.max(0, prod.stock - deduction.totalQty);
+      const updatedColors = prod.colors?.map((c) => {
+        const colorDeduct = deduction.byColor.get(c.name) ?? 0;
+        if (colorDeduct > 0 && typeof c.stock === "number") {
+          return { ...c, stock: Math.max(0, c.stock - colorDeduct) };
+        }
+        return c;
+      });
+      const updatedProd: ProductItem = {
+        ...prod,
+        stock: nextStock,
+        ...(updatedColors ? { colors: updatedColors } : {}),
+        updatedAt: "ตัดสต็อกอัตโนมัติ",
+      };
+
+      const colorJustRanOut = Boolean(
+        updatedColors?.some((c, idx) => {
+          const prevColorStock = prod.colors?.[idx]?.stock;
+          return (
+            typeof c.stock === "number" &&
+            c.stock <= 0 &&
+            typeof prevColorStock === "number" &&
+            prevColorStock > 0
+          );
+        })
+      );
+
+      if (nextStock < prod.lowThreshold || colorJustRanOut) {
+        newlyLowProducts.push(updatedProd);
+      }
+
+      return updatedProd;
+    });
+
+    setProducts(nextProducts);
 
     setOrders((prev) =>
       prev.map((o) =>
@@ -635,6 +839,14 @@ export default function App() {
       )
     );
     showToast(`แพ็ค #${orderId} สำเร็จ — ตัดสต็อกอัตโนมัติแล้ว`, "check_circle");
+
+    if (newlyLowProducts.length > 0) {
+      openLowStockLineAlert(
+        newlyLowProducts,
+        `หลังตัดสต็อกออเดอร์ #${orderId}`,
+        true
+      );
+    }
   };
 
   const handleMarkReadyToShip = (orderId: string) => {
@@ -761,6 +973,19 @@ export default function App() {
       "order"
     );
     showToast(`สร้างออเดอร์ #${newId} (${typeLabel}) สำเร็จ`, "add_shopping_cart");
+
+    // Automatically push new order alert via LINE API / Webhook to Hnan145
+    void dispatchAutoLineAlert(
+      "new_order",
+      buildNewOrderLineMessage(newOrder, ownerLineId),
+      {
+        orderId: newOrder.id,
+        customerName: newOrder.customerName,
+        orderType: newOrder.orderType || "delivery",
+        totalThb: newOrder.totalThb,
+        itemCount: newOrder.items.length,
+      }
+    );
   };
 
   const handleCreateCustomer = (data: Omit<Customer, "id" | "createdAt">) => {
@@ -836,6 +1061,10 @@ export default function App() {
         onOpenAiChat={() => setAiChatOpen((prev) => !prev)}
         isAiChatOpen={aiChatOpen}
         lowStockProducts={lowStockProducts}
+        ownerLineId={ownerLineId}
+        onNotifyLowStockLine={(items) =>
+          openLowStockLineAlert(items, "สรุปรายการสินค้าใกล้หมด")
+        }
         onSelectLowStockProduct={(prod) => {
           setActiveTab("inventory");
           setEditingProduct(prod);
@@ -895,6 +1124,10 @@ export default function App() {
             products={products}
             orders={orders}
             categories={categories}
+            ownerLineId={ownerLineId}
+            onNotifyLowStockLine={(items) =>
+              openLowStockLineAlert(items, "รายการสินค้าใกล้หมด/ต้องสั่งเติม")
+            }
             lastSyncedLabel={lastSyncedLabel}
             onSyncNow={() => {
               stampSynced();
@@ -959,6 +1192,22 @@ export default function App() {
               setOwnerPin(newPin);
               showToast("เปลี่ยนรหัสผ่านเจ้าของร้านเรียบร้อยแล้ว", "key");
             }}
+            ownerLineId={ownerLineId}
+            onUpdateOwnerLineId={(newLineId) => {
+              setOwnerLineId(newLineId);
+              showToast(`อัปเดต LINE ID แจ้งเตือนเป็น "${newLineId}" แล้ว`, "chat");
+            }}
+            onTestLineAutoNotify={() =>
+              void dispatchAutoLineAlert(
+                "test",
+                `🔔 [DenewStock] ทดสอบการส่งข้อความแจ้งเตือนอัตโนมัติไปยัง LINE ID: ${ownerLineId} (${new Date().toLocaleTimeString(
+                  "th-TH",
+                  { hour: "2-digit", minute: "2-digit" }
+                )} น.)`,
+                { test: true },
+                true
+              )
+            }
             pendingCount={pendingOrdersCount}
             packingCount={packingOrdersCount}
             readyToShipCount={readyToShipOrdersCount}
@@ -1023,8 +1272,17 @@ export default function App() {
         <EditProductModal
           product={editingProduct}
           role={role}
+          categories={categories}
+          ownerLineId={ownerLineId}
+          pendingRequest={
+            approvals.find(
+              (a) =>
+                a.productId === editingProduct.id && a.status === "pending"
+            ) || null
+          }
           onClose={() => setEditingProduct(null)}
           onUpdateOwner={handleUpdateProductOwner}
+          onUpdateProductDetails={handleUpdateProductDetails}
           onRequestStockChange={handleRequestStockChange}
           onSwitchToOwnerAuth={() => setActiveTab("owner-auth")}
         />
@@ -1063,6 +1321,15 @@ export default function App() {
           }
           onClose={() => setConfirmingDeliveryOrder(null)}
           onConfirm={handleConfirmDelivery}
+        />
+      )}
+
+      {lowStockLineAlert && (
+        <LowStockLineAlertModal
+          products={lowStockLineAlert.products}
+          ownerLineId={ownerLineId}
+          triggerContext={lowStockLineAlert.triggerContext}
+          onClose={() => setLowStockLineAlert(null)}
         />
       )}
 

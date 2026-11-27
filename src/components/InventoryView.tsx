@@ -8,6 +8,8 @@ interface InventoryViewProps {
   products: ProductItem[];
   orders: Order[];
   categories: string[];
+  ownerLineId: string;
+  onNotifyLowStockLine: (items: ProductItem[]) => void;
   lastSyncedLabel: string;
   onSyncNow: () => void;
   onQuickCreateOrder: () => void;
@@ -25,6 +27,8 @@ export function InventoryView({
   products,
   orders,
   categories,
+  ownerLineId,
+  onNotifyLowStockLine,
   lastSyncedLabel,
   onSyncNow,
   onQuickCreateOrder,
@@ -145,6 +149,8 @@ export function InventoryView({
         role={role}
         orders={orders}
         products={products}
+        ownerLineId={ownerLineId}
+        onNotifyLowStockLine={onNotifyLowStockLine}
         onNavigateOrdersWithTab={onNavigateOrdersWithTab}
         onSelectProductForEdit={onSelectProduct}
         onQuickCreateOrderForProduct={onQuickCreateOrderForProduct}
@@ -258,13 +264,27 @@ export function InventoryView({
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setStockFilter("all")}
-              className="h-8 px-3 rounded-lg bg-surface-container-lowest text-on-tertiary-fixed border border-secondary/35 hover:bg-surface-container-low text-[11px] font-semibold cursor-pointer whitespace-nowrap shrink-0"
-            >
-              แสดงสินค้าทั้งหมด
-            </button>
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              {filteredProducts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onNotifyLowStockLine(filteredProducts)}
+                  className="h-8 px-3 rounded-lg bg-[#06C755] hover:bg-[#05b34c] text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                >
+                  <span className="material-symbols-outlined text-[15px]">
+                    chat
+                  </span>
+                  <span>แจ้งเตือน LINE ({ownerLineId})</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setStockFilter("all")}
+                className="h-8 px-3 rounded-lg bg-surface-container-lowest text-on-tertiary-fixed border border-secondary/35 hover:bg-surface-container-low text-[11px] font-semibold cursor-pointer whitespace-nowrap"
+              >
+                แสดงสินค้าทั้งหมด
+              </button>
+            </div>
           </div>
         )}
 

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Customer,
   DeliveryConfirmationMethod,
@@ -8,8 +8,14 @@ import {
   ProductColorVariant,
   ProductItem,
   RoleMode,
+  StockApprovalRequest,
 } from "../types";
 import { readImageAsDataUrl } from "../utils/image";
+import {
+  buildLowStockLineMessage,
+  getLineDirectChatUrl,
+  getLineShareUrl,
+} from "../utils/lineAlert";
 import { ResilientImage } from "./ResilientImage";
 
 const PRESET_COLORS: { name: string; hex: string }[] = [
@@ -821,45 +827,148 @@ export function AddCategoryModal({
 interface EditProductModalProps {
   product: ProductItem;
   role: RoleMode;
+  categories: string[];
+  ownerLineId: string;
+  pendingRequest: StockApprovalRequest | null;
   onClose: () => void;
   onUpdateOwner: (updated: ProductItem) => void;
+  onUpdateProductDetails: (
+    updated: Pick<
+      ProductItem,
+      "id" | "name" | "sku" | "category" | "sellPriceThb" | "lowThreshold"
+    >
+  ) => void;
   onRequestStockChange: (
     product: ProductItem,
     requestedStock: number,
     reason: string
-  ) => void;
+  ) => StockApprovalRequest;
   onSwitchToOwnerAuth: () => void;
+}
+
+function buildLineStockApprovalMessage(
+  req: StockApprovalRequest,
+  ownerLineId: string
+): string {
+  const diff = req.requestedStock - req.currentStock;
+  const diffLabel = diff >= 0 ? `+${diff}` : `${diff}`;
+  return [
+    "📦 [DenewStock] ขออนุญาตแก้ไขจำนวนสต็อก",
+    `รหัสคำขอ: #${req.id}`,
+    `สินค้า: ${req.productName}`,
+    `รหัส SKU: ${req.sku}`,
+    `สต็อกเดิม: ${req.currentStock} ชิ้น → ขอปรับเป็น: ${req.requestedStock} ชิ้น (${diffLabel} ชิ้น)`,
+    `เหตุผล: ${req.reason}`,
+    `ผู้แจ้ง: ${req.requestedBy} · เวลา ${req.createdAt}`,
+    `แจ้งเตือนถึง LINE ID: ${ownerLineId}`,
+    "กรุณาเข้าโหมดเจ้าของร้านใน DenewStock เพื่อกดอนุมัติเปลี่ยนสต็อก",
+  ].join("\n");
 }
 
 export function EditProductModal({
   product,
   role,
+  categories,
+  ownerLineId,
+  pendingRequest,
   onClose,
   onUpdateOwner,
+  onUpdateProductDetails,
   onRequestStockChange,
   onSwitchToOwnerAuth,
 }: EditProductModalProps) {
-  const [stock, setStock] = useState(String(product.stock));
+  const [name, setName] = useState(product.name);
+  const [sku, setSku] = useState(product.sku);
+  const [category, setCategory] = useState(
+    product.category || categories[0] || ""
+  );
   const [sellPrice, setSellPrice] = useState(String(product.sellPriceThb));
+  const [lowThreshold, setLowThreshold] = useState(
+    String(product.lowThreshold)
+  );
   const [landedCost, setLandedCost] = useState(String(product.landedCostThb));
+  const [stock, setStock] = useState(String(product.stock));
   const [reason, setReason] = useState("ตรวจนับสต็อกจริงหน้าร้าน");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [submittedRequest, setSubmittedRequest] =
+    useState<StockApprovalRequest | null>(null);
+  const [copiedLineMsg, setCopiedLineMsg] = useState(false);
+
+  const parsedStock = Math.max(0, parseInt(stock, 10) || 0);
+  const stockDelta = parsedStock - product.stock;
+  const hasStockChange = parsedStock !== product.stock;
+
+  const categoryOptions = categories.includes(category)
+    ? categories
+    : [category, ...categories].filter(Boolean);
+
+  const handleSaveDetailsOrOwner = (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedStock = Math.max(0, parseInt(stock, 10) || 0);
+    const cleanedName = name.trim() || product.name;
+    const cleanedSku = sku.trim() || product.sku;
+    const parsedPrice = Math.max(0, parseFloat(sellPrice) || 0);
+    const parsedThreshold = Math.max(0, parseInt(lowThreshold, 10) || 0);
+
     if (role === "owner") {
       onUpdateOwner({
         ...product,
-        stock: parsedStock,
-        sellPriceThb: Math.max(0, parseFloat(sellPrice) || 0),
+        name: cleanedName,
+        sku: cleanedSku,
+        category: category || product.category,
+        sellPriceThb: parsedPrice,
+        lowThreshold: parsedThreshold,
         landedCostThb: Math.max(0, parseFloat(landedCost) || 0),
+        stock: parsedStock,
         updatedAt: "เมื่อสักครู่",
       });
+      onClose();
     } else {
-      onRequestStockChange(product, parsedStock, reason.trim() || "ขอปรับสต็อก");
+      onUpdateProductDetails({
+        id: product.id,
+        name: cleanedName,
+        sku: cleanedSku,
+        category: category || product.category,
+        sellPriceThb: parsedPrice,
+        lowThreshold: parsedThreshold,
+      });
     }
-    onClose();
   };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedLineMsg(true);
+      window.setTimeout(() => setCopiedLineMsg(false), 2500);
+    } catch {
+      // Clipboard API may be blocked in restricted contexts
+    }
+  };
+
+  const handleSendStockPermissionRequest = () => {
+    if (!hasStockChange) return;
+    const created = onRequestStockChange(
+      {
+        ...product,
+        name: name.trim() || product.name,
+        sku: sku.trim() || product.sku,
+      },
+      parsedStock,
+      reason.trim() || "ขออนุญาตปรับยอดสต็อก"
+    );
+    setSubmittedRequest(created);
+    const msg = buildLineStockApprovalMessage(created, ownerLineId);
+    void copyToClipboard(msg);
+  };
+
+  const lineMessage = submittedRequest
+    ? buildLineStockApprovalMessage(submittedRequest, ownerLineId)
+    : "";
+  const lineDirectChatUrl = `https://line.me/ti/p/~${encodeURIComponent(
+    ownerLineId
+  )}`;
+  const lineShareUrl = `https://line.me/R/share?text=${encodeURIComponent(
+    lineMessage
+  )}`;
 
   return (
     <div
@@ -867,117 +976,98 @@ export function EditProductModal({
       onClick={onClose}
     >
       <div
-        className="w-full sm:max-w-md bg-surface-container-lowest rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl"
+        className="w-full sm:max-w-lg bg-surface-container-lowest rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="w-10 h-1.5 bg-outline-variant/50 rounded-full mx-auto mb-3 sm:hidden" />
         <div className="flex items-start justify-between gap-2 mb-4">
-          <div>
-            <h3 className="text-[16px] font-semibold text-on-surface">
-              {product.name}
+          <div className="min-w-0">
+            <h3 className="text-[16px] font-semibold text-on-surface truncate">
+              แก้ไขสินค้า: {product.name}
             </h3>
             <p className="text-[12px] text-on-surface-variant">
-              {product.sku} · คงเหลือปัจจุบัน {product.stock} ชิ้น
+              {product.sku} · สต็อกปัจจุบัน{" "}
+              <span className="font-semibold text-on-surface tabular-nums">
+                {product.stock} ชิ้น
+              </span>
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container cursor-pointer"
+            className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container cursor-pointer shrink-0"
           >
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
 
-        {role === "staff" && (
-          <div className="mb-3 p-3 rounded-xl bg-tertiary-fixed/40 text-on-tertiary-fixed flex items-start gap-2">
-            <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">
-              lock
-            </span>
-            <div className="text-[12px] leading-relaxed">
-              <p className="font-semibold">
-                โหมดพนักงาน: ไม่อนุญาตให้แก้ไขสต็อกโดยตรง
-              </p>
-              <p className="opacity-85">
-                คุณสามารถส่งคำขอปรับยอดให้เจ้าของร้านอนุมัติ หรือ{" "}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onSwitchToOwnerAuth();
-                  }}
-                  className="underline font-semibold cursor-pointer"
-                >
-                  ปลดล็อกโหมดเจ้าของร้าน
-                </button>
-              </p>
-            </div>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div>
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <label className="block text-[12px] font-medium text-on-surface-variant">
-                {role === "owner"
-                  ? "จำนวนสต็อกใหม่ (ชิ้น)"
-                  : "จำนวนสต็อกที่ขอปรับ (ชิ้น)"}
-              </label>
-              <span className="text-[11px] text-on-surface-variant tabular-nums">
-                เกณฑ์ขั้นต่ำ: {product.lowThreshold} ชิ้น
+        {/* Section 1: Editable Product Details (Available for BOTH Staff and Owner) */}
+        <form onSubmit={handleSaveDetailsOrOwner} className="flex flex-col gap-3">
+          <div className="bg-surface-container-low/70 border border-outline-variant/30 rounded-xl p-3.5 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[13px] font-semibold text-on-surface flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[17px] text-primary">
+                  edit_note
+                </span>
+                <span>รายละเอียดสินค้า</span>
+              </span>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container">
+                {role === "owner" ? "แก้ไขได้ทั้งหมด" : "พนักงานแก้ไขข้อมูลได้"}
               </span>
             </div>
-            <input
-              type="number"
-              min="0"
-              value={stock}
-              onChange={(e) => setStock(e.target.value)}
-              className="w-full h-11 px-3 rounded-lg bg-surface-container-low border border-outline-variant/40 text-[16px] font-semibold text-on-surface tabular-nums focus:outline-none focus:border-primary"
-            />
-            <div className="flex items-center flex-wrap gap-1.5 mt-2">
-              {[-5, -1, 1, 5, 10].map((delta) => (
-                <button
-                  key={delta}
-                  type="button"
-                  onClick={() => {
-                    const current = Math.max(0, parseInt(stock, 10) || 0);
-                    setStock(String(Math.max(0, current + delta)));
-                  }}
-                  className="h-8 px-2.5 rounded-lg bg-surface-container-low hover:bg-surface-container border border-outline-variant/40 text-[12px] font-semibold text-on-surface tabular-nums cursor-pointer active:scale-95 transition-transform"
-                >
-                  {delta > 0 ? `+${delta}` : delta}
-                </button>
-              ))}
-              {product.stock < product.lowThreshold && (
-                <button
-                  type="button"
-                  onClick={() => setStock(String(product.lowThreshold))}
-                  className="h-8 px-2.5 rounded-lg bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary text-[11px] font-semibold tabular-nums cursor-pointer active:scale-95 transition-colors ml-auto"
-                >
-                  เติมครบเกณฑ์ ({product.lowThreshold})
-                </button>
-              )}
-            </div>
-          </div>
 
-          {role === "owner" ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[12px] font-medium text-on-surface-variant mb-1">
+                ชื่อสินค้า
+              </label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full h-10 px-3 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-[13px] font-medium text-on-surface focus:outline-none focus:border-primary"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <label className="block text-[12px] font-medium text-on-surface-variant mb-1">
-                  ต้นทุนแลนดิ้ง (฿/ชิ้น)
+                  รหัสสินค้า (SKU)
                 </label>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={landedCost}
-                  onChange={(e) => setLandedCost(e.target.value)}
-                  className="w-full h-11 px-3 rounded-lg bg-surface-container-low border border-outline-variant/40 text-[14px] text-on-surface tabular-nums focus:outline-none focus:border-primary"
+                  type="text"
+                  required
+                  value={sku}
+                  onChange={(e) => setSku(e.target.value)}
+                  className="w-full h-10 px-3 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-[13px] text-on-surface focus:outline-none focus:border-primary"
                 />
               </div>
               <div>
                 <label className="block text-[12px] font-medium text-on-surface-variant mb-1">
-                  ราคาขาย (฿/ชิ้น)
+                  หมวดหมู่กระเป๋า
+                </label>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full h-10 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-[13px] text-on-surface focus:outline-none focus:border-primary"
+                >
+                  {categoryOptions.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div
+              className={`grid gap-2.5 ${
+                role === "owner" ? "grid-cols-3" : "grid-cols-2"
+              }`}
+            >
+              <div>
+                <label className="block text-[12px] font-medium text-on-surface-variant mb-1">
+                  ราคาขาย (฿)
                 </label>
                 <input
                   type="number"
@@ -985,43 +1075,325 @@ export function EditProductModal({
                   step="1"
                   value={sellPrice}
                   onChange={(e) => setSellPrice(e.target.value)}
-                  className="w-full h-11 px-3 rounded-lg bg-surface-container-low border border-outline-variant/40 text-[14px] font-semibold text-primary tabular-nums focus:outline-none focus:border-primary"
+                  className="w-full h-10 px-3 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-[14px] font-semibold text-primary tabular-nums focus:outline-none focus:border-primary"
                 />
               </div>
+              <div>
+                <label className="block text-[12px] font-medium text-on-surface-variant mb-1">
+                  เกณฑ์เตือนต่ำ
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={lowThreshold}
+                  onChange={(e) => setLowThreshold(e.target.value)}
+                  className="w-full h-10 px-3 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-[14px] text-on-surface tabular-nums focus:outline-none focus:border-primary"
+                />
+              </div>
+              {role === "owner" && (
+                <div>
+                  <label className="block text-[12px] font-medium text-on-surface-variant mb-1">
+                    ต้นทุน (฿)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={landedCost}
+                    onChange={(e) => setLandedCost(e.target.value)}
+                    className="w-full h-10 px-3 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-[14px] text-on-surface tabular-nums focus:outline-none focus:border-primary"
+                  />
+                </div>
+              )}
+            </div>
+
+            {role === "staff" && (
+              <button
+                type="submit"
+                className="w-full h-10 rounded-xl bg-primary text-on-primary font-semibold text-[13px] flex items-center justify-center gap-1.5 shadow-sm hover:bg-primary-dim active:scale-[0.99] transition-all cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  save
+                </span>
+                <span>บันทึกข้อมูลสินค้า (ไม่เปลี่ยนสต็อก)</span>
+              </button>
+            )}
+          </div>
+
+          {/* Section 2: Stock Quantity Management (Direct for Owner, Approval + LINE Notification for Staff) */}
+          <div
+            className={`rounded-xl p-3.5 border flex flex-col gap-3 ${
+              role === "owner"
+                ? "bg-surface-container-low/70 border-outline-variant/30"
+                : "bg-tertiary-fixed/30 border-primary/30"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[13px] font-semibold text-on-surface flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[17px] text-primary">
+                  {role === "owner" ? "inventory_2" : "lock"}
+                </span>
+                <span>
+                  {role === "owner"
+                    ? "จำนวนสต็อกสินค้า (ชิ้น)"
+                    : "ขออนุญาตแก้ไขจำนวนสต็อก"}
+                </span>
+              </span>
+              {role === "staff" && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#06C755]/15 text-[#059642] text-[11px] font-bold">
+                  <span className="material-symbols-outlined text-[13px]">
+                    chat
+                  </span>
+                  <span>แจ้งเตือน LINE: {ownerLineId}</span>
+                </span>
+              )}
+            </div>
+
+            {role === "staff" && (
+              <p className="text-[12px] text-on-surface-variant leading-relaxed">
+                พนักงานไม่สามารถเปลี่ยนยอดสต็อกได้โดยตรง ต้องกดส่งคำขออนุญาตไปที่เจ้าของร้านและแจ้งเตือนผ่าน{" "}
+                <span className="font-semibold text-on-surface">
+                  LINE ID: {ownerLineId}
+                </span>{" "}
+                เมื่อเจ้าของร้านอนุมัติแล้วสต็อกจึงจะอัปเดต
+              </p>
+            )}
+
+            {role === "staff" && pendingRequest && !submittedRequest && (
+              <div className="rounded-lg bg-primary-fixed/50 border border-primary/25 px-3 py-2 text-[12px] text-on-primary-fixed flex items-center justify-between gap-2">
+                <span className="font-medium">
+                  มีคำขอรออนุมัติ: {pendingRequest.currentStock} →{" "}
+                  {pendingRequest.requestedStock} ชิ้น
+                </span>
+                <span className="text-[11px] opacity-80">
+                  #{pendingRequest.id}
+                </span>
+              </div>
+            )}
+
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label className="block text-[12px] font-medium text-on-surface-variant">
+                  {role === "owner"
+                    ? "จำนวนสต็อกใหม่ (ชิ้น)"
+                    : "จำนวนสต็อกที่ขอเปลี่ยนเป็น (ชิ้น)"}
+                </label>
+                {hasStockChange && (
+                  <span
+                    className={`text-[11px] font-bold tabular-nums px-2 py-0.5 rounded-full ${
+                      stockDelta > 0
+                        ? "bg-secondary-container text-on-secondary-container"
+                        : "bg-error-container text-on-error-container"
+                    }`}
+                  >
+                    {product.stock} → {parsedStock} (
+                    {stockDelta > 0 ? `+${stockDelta}` : stockDelta})
+                  </span>
+                )}
+              </div>
+              <input
+                type="number"
+                min="0"
+                value={stock}
+                onChange={(e) => {
+                  setStock(e.target.value);
+                  if (submittedRequest) setSubmittedRequest(null);
+                }}
+                className="w-full h-11 px-3 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-[16px] font-semibold text-on-surface tabular-nums focus:outline-none focus:border-primary"
+              />
+              <div className="flex items-center flex-wrap gap-1.5 mt-2">
+                {[-5, -1, 1, 5, 10].map((delta) => (
+                  <button
+                    key={delta}
+                    type="button"
+                    onClick={() => {
+                      const current = Math.max(0, parseInt(stock, 10) || 0);
+                      setStock(String(Math.max(0, current + delta)));
+                      if (submittedRequest) setSubmittedRequest(null);
+                    }}
+                    className="h-8 px-2.5 rounded-lg bg-surface-container-lowest hover:bg-surface-container border border-outline-variant/40 text-[12px] font-semibold text-on-surface tabular-nums cursor-pointer active:scale-95 transition-transform"
+                  >
+                    {delta > 0 ? `+${delta}` : delta}
+                  </button>
+                ))}
+                {product.stock < product.lowThreshold && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStock(String(product.lowThreshold));
+                      if (submittedRequest) setSubmittedRequest(null);
+                    }}
+                    className="h-8 px-2.5 rounded-lg bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary text-[11px] font-semibold tabular-nums cursor-pointer active:scale-95 transition-colors ml-auto"
+                  >
+                    เติมครบเกณฑ์ ({product.lowThreshold})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {role === "staff" && (
+              <>
+                <div>
+                  <label className="block text-[12px] font-medium text-on-surface-variant mb-1">
+                    เหตุผลในการขอปรับยอดสต็อก
+                  </label>
+                  <input
+                    type="text"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="เช่น ตรวจนับสต็อกจริงหน้าร้าน / รับของเพิ่ม / สินค้าชำรุด"
+                    className="w-full h-10 px-3 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-[13px] text-on-surface focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                {!submittedRequest ? (
+                  <div className="flex flex-col gap-1.5">
+                    <button
+                      type="button"
+                      disabled={!hasStockChange}
+                      onClick={handleSendStockPermissionRequest}
+                      className={`w-full h-11 rounded-xl font-semibold text-[13px] flex items-center justify-center gap-1.5 shadow-sm transition-all ${
+                        hasStockChange
+                          ? "bg-[#06C755] hover:bg-[#05b34c] text-white cursor-pointer active:scale-[0.99]"
+                          : "bg-surface-container text-on-surface-variant/60 cursor-not-allowed"
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[19px]">
+                        send
+                      </span>
+                      <span>
+                        ส่งคำขออนุญาตเจ้าของร้าน (แจ้งเตือน LINE: {ownerLineId})
+                      </span>
+                    </button>
+                    {!hasStockChange && (
+                      <p className="text-[11px] text-on-surface-variant text-center">
+                        ปรับตัวเลขสต็อกด้านบนให้ต่างจากยอดปัจจุบัน ({product.stock}{" "}
+                        ชิ้น) เพื่อกดส่งคำขออนุญาต
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  /* Instant LINE Notification Ready Card */
+                  <div className="rounded-xl bg-surface-container-lowest border-2 border-[#06C755]/50 p-3 flex flex-col gap-2.5 shadow-sm">
+                    <div className="flex items-center gap-2 text-[#059642]">
+                      <span className="material-symbols-outlined material-symbols-filled text-[20px]">
+                        check_circle
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-bold">
+                          ส่งคำขออนุญาต #{submittedRequest.id} เข้าสู่ระบบแล้ว
+                        </p>
+                        <p className="text-[11px] text-on-surface-variant">
+                          กดปุ่มด้านล่างเพื่อส่งแจ้งเตือนไปยัง LINE ID:{" "}
+                          <span className="font-semibold text-on-surface">
+                            {ownerLineId}
+                          </span>{" "}
+                          ทันที
+                        </p>
+                      </div>
+                    </div>
+
+                    <pre className="text-[11px] leading-relaxed text-on-surface bg-surface-container-low rounded-lg p-2.5 whitespace-pre-wrap font-sans border border-outline-variant/30">
+                      {lineMessage}
+                    </pre>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <a
+                        href={lineDirectChatUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => void copyToClipboard(lineMessage)}
+                        className="h-10 px-3 rounded-xl bg-[#06C755] hover:bg-[#05b34c] text-white font-semibold text-[12px] flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[17px]">
+                          chat
+                        </span>
+                        <span>เปิดแชท LINE ({ownerLineId})</span>
+                      </a>
+                      <a
+                        href={lineShareUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => void copyToClipboard(lineMessage)}
+                        className="h-10 px-3 rounded-xl bg-primary-fixed hover:bg-primary text-on-primary-fixed hover:text-on-primary font-semibold text-[12px] flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[17px]">
+                          share
+                        </span>
+                        <span>ส่งข้อความผ่าน LINE</span>
+                      </a>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => void copyToClipboard(lineMessage)}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">
+                          {copiedLineMsg ? "done" : "content_copy"}
+                        </span>
+                        <span>
+                          {copiedLineMsg
+                            ? "คัดลอกข้อความแจ้งเตือนแล้ว!"
+                            : "คัดลอกข้อความแจ้งเตือน"}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onSwitchToOwnerAuth();
+                        }}
+                        className="text-[11px] font-semibold text-on-surface-variant hover:text-primary underline cursor-pointer"
+                      >
+                        เข้าหน้าเจ้าของร้านเพื่ออนุมัติ →
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {role === "owner" ? (
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 h-11 rounded-xl bg-surface-container text-on-surface font-semibold text-[14px] cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="submit"
+                className="flex-[1.5] h-11 rounded-xl bg-primary text-on-primary font-semibold text-[14px] shadow-md cursor-pointer hover:bg-primary-dim"
+              >
+                บันทึกการแก้ไขทั้งหมด
+              </button>
             </div>
           ) : (
-            <div>
-              <label className="block text-[12px] font-medium text-on-surface-variant mb-1">
-                เหตุผลในการขอปรับยอดสต็อก
-              </label>
-              <input
-                type="text"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                className="w-full h-11 px-3 rounded-lg bg-surface-container-low border border-outline-variant/40 text-[13px] text-on-surface focus:outline-none focus:border-primary"
-              />
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onSwitchToOwnerAuth();
+                }}
+                className="text-[12px] font-semibold text-primary hover:underline cursor-pointer"
+              >
+                ปลดล็อกโหมดเจ้าของร้าน
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-10 px-5 rounded-xl bg-surface-container text-on-surface font-semibold text-[13px] cursor-pointer"
+              >
+                ปิดหน้าต่าง
+              </button>
             </div>
           )}
-
-          <div className="flex items-center gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 h-11 rounded-xl bg-surface-container text-on-surface font-semibold text-[14px] cursor-pointer"
-            >
-              ยกเลิก
-            </button>
-            <button
-              type="submit"
-              className={`flex-[1.5] h-11 rounded-xl font-semibold text-[14px] shadow-md cursor-pointer ${
-                role === "owner"
-                  ? "bg-primary text-on-primary"
-                  : "bg-secondary text-on-secondary"
-              }`}
-            >
-              {role === "owner" ? "บันทึกการแก้ไข" : "ส่งคำขออนุมัติ"}
-            </button>
-          </div>
         </form>
       </div>
     </div>
@@ -2385,6 +2757,183 @@ export function CreateOrderModal({
             </span>
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+interface LowStockLineAlertModalProps {
+  products: ProductItem[];
+  ownerLineId: string;
+  triggerContext?: string;
+  onClose: () => void;
+}
+
+export function LowStockLineAlertModal({
+  products,
+  ownerLineId,
+  triggerContext,
+  onClose,
+}: LowStockLineAlertModalProps) {
+  const [copied, setCopied] = useState(false);
+
+  const lineMessage = buildLowStockLineMessage(
+    products,
+    ownerLineId,
+    triggerContext
+  );
+  const directChatUrl = getLineDirectChatUrl(ownerLineId);
+  const shareUrl = getLineShareUrl(lineMessage);
+
+  const copyMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(lineMessage);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Clipboard may be unavailable in restricted contexts
+    }
+  };
+
+  useEffect(() => {
+    void copyMessage();
+  }, [lineMessage]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`แจ้งเตือนสินค้าใกล้หมดไปยัง LINE ID ${ownerLineId}`}
+      className="fixed inset-0 z-50 bg-inverse-surface/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full sm:max-w-lg bg-surface-container-lowest rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl border border-outline-variant/40 max-h-[90vh] overflow-y-auto flex flex-col gap-3.5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="w-10 h-1.5 bg-outline-variant/50 rounded-full mx-auto sm:hidden" />
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-xl bg-[#06C755]/15 text-[#059642] flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined material-symbols-filled text-[24px]">
+                notifications_active
+              </span>
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-[16px] font-bold text-on-surface truncate">
+                แจ้งเตือนสินค้าใกล้หมด → LINE
+              </h3>
+              <p className="text-[12px] text-on-surface-variant">
+                เป้าหมาย:{" "}
+                <span className="font-bold text-[#059642]">
+                  LINE ID: {ownerLineId}
+                </span>
+                {triggerContext ? ` · ${triggerContext}` : ""}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="ปิดหน้าต่าง"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full hover:bg-surface-container text-on-surface-variant flex items-center justify-center cursor-pointer shrink-0"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        {/* Low Stock Items Summary */}
+        <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-0.5">
+          {products.map((p) => {
+            const isOut = p.stock <= 0;
+            const shortfall = Math.max(0, p.lowThreshold - p.stock);
+            return (
+              <div
+                key={p.id}
+                className={`rounded-xl px-3 py-2 border flex items-center justify-between gap-2 text-[12px] ${
+                  isOut
+                    ? "bg-error-container/35 border-error/30"
+                    : "bg-tertiary-fixed/55 border-secondary/35"
+                }`}
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-on-surface truncate">
+                    {p.name}
+                  </p>
+                  <p className="text-[11px] text-on-surface-variant tabular-nums">
+                    {p.sku} · ขั้นต่ำ {p.lowThreshold} ชิ้น
+                    {shortfall > 0 ? ` · ขาด +${shortfall} ชิ้น` : ""}
+                  </p>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums shrink-0 ${
+                    isOut
+                      ? "bg-error text-on-error"
+                      : "bg-primary text-on-primary"
+                  }`}
+                >
+                  เหลือ {p.stock} ชิ้น
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Formatted LINE Notification Message Preview */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[12px] font-semibold text-on-surface-variant">
+              ข้อความแจ้งเตือนพร้อมส่งเข้า LINE
+            </span>
+            <button
+              type="button"
+              onClick={() => void copyMessage()}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[15px]">
+                {copied ? "done" : "content_copy"}
+              </span>
+              <span>{copied ? "คัดลอกข้อความแล้ว!" : "คัดลอกข้อความ"}</span>
+            </button>
+          </div>
+          <pre className="text-[11.5px] leading-relaxed text-on-surface bg-surface-container-low rounded-xl p-3 whitespace-pre-wrap font-sans border border-outline-variant/35 max-h-44 overflow-y-auto">
+            {lineMessage}
+          </pre>
+        </div>
+
+        {/* Direct LINE Action Buttons (No window.open) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+          <a
+            href={directChatUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => void copyMessage()}
+            className="h-11 px-4 rounded-xl bg-[#06C755] hover:bg-[#05b34c] text-white font-semibold text-[13px] flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+          >
+            <span className="material-symbols-outlined text-[19px]">chat</span>
+            <span>เปิดแชท LINE ({ownerLineId})</span>
+          </a>
+          <a
+            href={shareUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => void copyMessage()}
+            className="h-11 px-4 rounded-xl bg-primary hover:bg-primary-dim text-on-primary font-semibold text-[13px] flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+          >
+            <span className="material-symbols-outlined text-[19px]">send</span>
+            <span>ส่งข้อความผ่าน LINE ทันที</span>
+          </a>
+        </div>
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full h-10 rounded-xl bg-surface-container text-on-surface font-semibold text-[13px] cursor-pointer"
+        >
+          ปิดหน้าต่าง
+        </button>
       </div>
     </div>
   );
