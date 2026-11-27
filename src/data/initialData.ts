@@ -1,19 +1,13 @@
 import {
+  AccountingEntry,
   AppNotification,
   Customer,
   Order,
   ProductItem,
-  ScannedInvoice,
   StockApprovalRequest,
 } from "../types";
 
 export const STITCH_IMAGES = {
-  invoiceGuangzhou:
-    "https://lh3.googleusercontent.com/aida-public/AB6AXuAKJP0GwabhnLG8UCAvZMrvfhZkqx0o4obD7JuqypD6wZi-jw0RrYlGPxCxMbv7OkZxifIFIyIZWCvWJqoeTBJX_n8RdrSRHobo0Pl9fchh40EqK7vanrkI-PVvwnhTvPqyz1rLp1Hxs263A4FttIooWHUUnHfXJCRLOfsYynK45UI5TY7sI4tE58KKNdsLnNr0RdVIP3QUu4Fyc_gAkoqc2L6IFrld3EimvnlTPhs",
-  earbudsScanner:
-    "https://lh3.googleusercontent.com/aida-public/AB6AXuDIT2kktV3gOG-rfK3Qn4c4g8kGkTsoBTR6auCzT0Sp2Tp5k5fDGdG4pdHiDRzaxjJM8UhqblvdYU3RiX4v1ent1QdK0YLEFY0zbeVK3ST37HMUBPYJ6Kh8u7ke54_zNZoltjIgpmdU38TTxRoMNdBJxTkf_1UkfDRcbSfabN1lm9rT-xgOZVnFbAmdosQnrT-cQGenfp1G6imVhsUk4eRctS1G4sY8m-kPzV6OawU",
-  cableScanner:
-    "https://lh3.googleusercontent.com/aida-public/AB6AXuCZkOcqdy7Za_aglUJKMzCCL7iFagbgqomoajXXYbYK-CEpbq40czwXP2QNgBgdzQszTvRE2GcqE5uI8hwb7GpNlmhpki5_8bDzD1u5EP-Kc_gTfqJ3YEXZVvrlKkVhnQhMjlUCoipg0wmgGOJUpisdCyvgWtaIZuyokFsGTRPqDt1uOt8Gl84_OgepHuodHC9NhtLVGLKzdg0b6NfbsVRLnvl5mCFnvWaevora-Yw",
   earbudsInventory:
     "https://lh3.googleusercontent.com/aida-public/AB6AXuCaiFAaAak20PeSxPi2VPd8DS3Wi_7hfGV3S3eD8nx2GQ-XMvy0-Xq2GuFzgkLQ1eSsijyAX5ca9DKVykbFPHe9GgHFG_04HauiIjUID7WFAj2e8gbbzXaQUrZSujJuPzMB6EhLS4jTUPhnWDvxDSlkoTCqlOxWLhDHqFGHf_GOAZS_TMKxhiA9ZdNNHJGRmK_sneAcIybxBJF4iDdnOsbypEuGtYaGfTxuspQuz2M",
   cableInventory:
@@ -40,137 +34,138 @@ export const INITIAL_CATEGORIES: string[] = [
   "พวงกุญแจ & อะไหล่กระเป๋า",
 ];
 
-export const INITIAL_INVOICE: ScannedInvoice = {
-  title: "广州批发市场采购单",
-  code: "OCR #CN-8842",
-  confidence: 98,
-  imageUrl: STITCH_IMAGES.invoiceGuangzhou,
-  aiAnalysis: {
-    summary:
-      "AI ตรวจพบสินค้ากลุ่มกระเป๋า 2 รายการ รวม 150 ชิ้น จากตลาดค้าส่งกวางโจว แบ่งเป็นหมวดกระเป๋าสะพายข้าง และกระเป๋าผ้า / Tote โดยทั้ง 2 รายการตรงกับรหัสสินค้าเดิมในคลัง สามารถกดเติมสต็อกได้ทันที",
-    supplierType: "ตลาดค้าส่งกระเป๋ากวางโจว (Guangzhou Wholesale)",
-    currencyDetected: "CNY (หยวน)",
-    keyHighlights: [
-      "ตรงกับสินค้าเดิมในคลัง 2 รายการ (SKU-BAG-01, SKU-TOTE-02) พร้อมอัปเดตต้นทุนนำเข้าล่าสุด",
-      "กระเป๋าผ้า Tote ต้นทุนต่อชิ้นต่ำ สามารถตั้งราคาขายปลีกทำกำไรได้สูงกว่า 50%",
-      "แยกหมวดหมู่ครบ 2 หมวดตรงตามโครงสร้างคลังร้าน DenewStock",
-    ],
-    suggestedNewCategories: [],
-    analyzedAt: "วิเคราะห์แล้ว",
-  },
-  items: [
-    {
-      id: "scan-1",
-      chineseName: "简约单肩斜挎包",
-      thaiName: "กระเป๋าสะพายข้างหนัง PU มินิมอล",
-      sku: "SKU-BAG-01",
-      category: "กระเป๋าสะพายข้าง",
-      quantity: 50,
-      unitPriceCny: 35.0,
-      imageUrl: STITCH_IMAGES.earbudsScanner,
-      productType: "กระเป๋าสะพายข้างทรงมินิมอล",
-      material: "หนัง PU นิ่มกันรอย",
-      colorVariants: ["ขาว", "ดำ", "ชมพู"],
-      sizeSpec: "22 × 15 × 7 ซม.",
-      suggestedSellPriceThb: 390,
-      aiReason: "คำว่า '单肩斜挎包' ระบุชัดว่าเป็นกระเป๋าสะพายไหล่/สะพายข้าง จึงจัดเข้าหมวดกระเป๋าสะพายข้าง",
-      matchedExistingSku: "SKU-BAG-01",
-      confidence: 99,
-    },
-    {
-      id: "scan-2",
-      chineseName: "大容量托特包",
-      thaiName: "กระเป๋าผ้า Tote จุของได้เยอะ",
-      sku: "SKU-TOTE-02",
-      category: "กระเป๋าผ้า / Tote",
-      quantity: 100,
-      unitPriceCny: 18.5,
-      imageUrl: STITCH_IMAGES.cableScanner,
-      productType: "กระเป๋า Tote ความจุสูง",
-      material: "ผ้าแคนวาสหนา",
-      colorVariants: ["ดำ", "ขาว", "น้ำเงิน"],
-      sizeSpec: "38 × 32 × 12 ซม.",
-      suggestedSellPriceThb: 199,
-      aiReason: "คำว่า '大容量托特包' หมายถึงกระเป๋า Tote ใบใหญ่ จึงจัดเข้าหมวดกระเป๋าผ้า / Tote",
-      matchedExistingSku: "SKU-TOTE-02",
-      confidence: 97,
-    },
-  ],
-};
+export const INCOME_CATEGORIES: string[] = [
+  "ขายสินค้าหน้าร้าน",
+  "ขายออนไลน์ (Shopee/TikTok/LINE)",
+  "ขายส่ง / พรีออเดอร์",
+  "รายรับอื่นๆ",
+];
 
-export const SAMPLE_ALTERNATE_INVOICES: ScannedInvoice[] = [
-  INITIAL_INVOICE,
+export const EXPENSE_CATEGORIES: string[] = [
+  "สั่งซื้อสต็อกกระเป๋า",
+  "ค่าขนส่งนำเข้าจีน-ไทย",
+  "ค่าจัดส่งพัสดุในไทย",
+  "ค่ากล่อง / อุปกรณ์แพ็ค",
+  "ค่าเช่าร้าน / ค่าน้ำ-ค่าไฟ",
+  "ค่าโฆษณา / ยิงแอด",
+  "เงินเดือนพนักงาน",
+  "ค่าใช้จ่ายเบ็ดเตล็ด",
+];
+
+function daysAgoIso(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+export const INITIAL_ACCOUNTING_ENTRIES: AccountingEntry[] = [
   {
-    title: "义乌箱包批发采购单",
-    code: "OCR #YW-5219",
-    confidence: 96,
-    imageUrl: STITCH_IMAGES.invoiceGuangzhou,
-    aiAnalysis: {
-      summary:
-        "AI แยกสินค้าในบิลค้าส่งอี้อู่ออกเป็น 3 รายการ (210 ชิ้น) ครอบคลุม 3 หมวดหมู่: กระเป๋าเป้, กระเป๋าสตางค์ และพวงกุญแจ & อะไหล่กระเป๋า โดยมีรายการเติมสต็อกเดิม 2 รายการ และสินค้าใหม่ 1 รายการ",
-      supplierType: "ตลาดค้าส่งเครื่องหนังและกระเป๋าอี้อู่ (Yiwu Market)",
-      currencyDetected: "CNY (หยวน)",
-      keyHighlights: [
-        "พบสินค้าใกล้หมดในคลัง (SKU-BP-03 เหลือ 9 ชิ้น) บิลนี้ช่วยเติมสต็อกได้ทันที +60 ชิ้น",
-        "ตรวจพบสินค้าใหม่ 1 รายการ: พวงกุญแจตุ๊กตาห้อยกระเป๋า (SKU-ACC-09)",
-        "จัดแยกหมวดหมู่อัตโนมัติ 3 หมวดชัดเจน พร้อมราคาขายปลีกแนะนำ",
-      ],
-      suggestedNewCategories: [],
-      analyzedAt: "วิเคราะห์แล้ว",
-    },
-    items: [
-      {
-        id: "scan-alt-1",
-        chineseName: "时尚双肩背包",
-        thaiName: "กระเป๋าเป้แฟชั่นกันน้ำ",
-        sku: "SKU-BP-03",
-        category: "กระเป๋าเป้",
-        quantity: 60,
-        unitPriceCny: 28.5,
-        productType: "เป้สะพายหลังแฟชั่นกันน้ำ",
-        material: "ผ้าไนลอนกันน้ำ",
-        colorVariants: ["ขาวครีม", "ฟ้าพาสเทล", "เขียวอ่อน"],
-        sizeSpec: "30 × 40 × 14 ซม.",
-        suggestedSellPriceThb: 359,
-        aiReason: "คำว่า '双肩背包' คือกระเป๋าเป้สะพายหลัง ตรงกับหมวดกระเป๋าเป้และ SKU-BP-03 เดิม",
-        matchedExistingSku: "SKU-BP-03",
-        confidence: 98,
-      },
-      {
-        id: "scan-alt-2",
-        chineseName: "短款折叠钱包",
-        thaiName: "กระเป๋าสตางค์ใบสั้นซิปรอบ",
-        sku: "SKU-WL-04",
-        category: "กระเป๋าสตางค์",
-        quantity: 120,
-        unitPriceCny: 12.2,
-        imageUrl: STITCH_IMAGES.caseClear,
-        productType: "กระเป๋าสตางค์แบบพับใบสั้น",
-        material: "หนัง PU ลายเม็ด",
-        colorVariants: ["ครีม", "ดำ"],
-        sizeSpec: "11 × 9 × 2.5 ซม.",
-        suggestedSellPriceThb: 149,
-        aiReason: "คำว่า '短款折叠钱包' คือกระเป๋าสตางค์ใบสั้น จัดเข้าหมวดกระเป๋าสตางค์",
-        matchedExistingSku: "SKU-WL-04",
-        confidence: 97,
-      },
-      {
-        id: "scan-alt-3",
-        chineseName: "可爱毛绒包挂件钥匙扣",
-        thaiName: "พวงกุญแจตุ๊กตาขนฟูห้อยกระเป๋า",
-        sku: "SKU-ACC-09",
-        category: "พวงกุญแจ & อะไหล่กระเป๋า",
-        quantity: 30,
-        unitPriceCny: 6.5,
-        productType: "พวงกุญแจตกแต่งกระเป๋า",
-        material: "ผ้าขนฟู + ตะขอโลหะ",
-        colorVariants: ["น้ำตาล", "ชมพู", "ขาว"],
-        sizeSpec: "สูง 10 ซม.",
-        suggestedSellPriceThb: 89,
-        aiReason: "คำว่า '包挂件钥匙扣' คือของตกแต่ง/พวงกุญแจห้อยกระเป๋า จึงแยกเข้าหมวดพวงกุญแจ & อะไหล่กระเป๋า",
-        confidence: 95,
-      },
-    ],
+    id: "acc-1",
+    date: daysAgoIso(0),
+    type: "income",
+    category: "ขายออนไลน์ (Shopee/TikTok/LINE)",
+    title: "ยอดขายออเดอร์ #ORD-202501 (คุณสมชาย ใจดี)",
+    amountThb: 1167,
+    paymentMethod: "แพลตฟอร์ม (Shopee/TikTok)",
+    referenceCode: "ORD-202501",
+    sourceOrderId: "ORD-202501",
+  },
+  {
+    id: "acc-2",
+    date: daysAgoIso(0),
+    type: "income",
+    category: "ขายสินค้าหน้าร้าน",
+    title: "ยอดขายหน้าร้าน Walk-in #ORD-202503 (คุณธนกฤต)",
+    amountThb: 780,
+    paymentMethod: "พร้อมเพย์",
+    referenceCode: "ORD-202503",
+    sourceOrderId: "ORD-202503",
+  },
+  {
+    id: "acc-3",
+    date: daysAgoIso(0),
+    type: "expense",
+    category: "ค่าจัดส่งพัสดุในไทย",
+    title: "ค่าส่งพัสดุ Flash & J&T รอบเช้า (12 กล่อง)",
+    amountThb: 420,
+    paymentMethod: "โอนธนาคาร",
+    referenceCode: "SHP-1127",
+    note: "ตัดรอบส่ง 14:00 น.",
+  },
+  {
+    id: "acc-4",
+    date: daysAgoIso(1),
+    type: "income",
+    category: "ขายสินค้าหน้าร้าน",
+    title: "ยอดขายหน้าร้าน #ORD-202495 (คุณวิชัย รัตนากร)",
+    amountThb: 1269,
+    paymentMethod: "เงินสด",
+    referenceCode: "ORD-202495",
+    sourceOrderId: "ORD-202495",
+  },
+  {
+    id: "acc-5",
+    date: daysAgoIso(1),
+    type: "income",
+    category: "ขายส่ง / พรีออเดอร์",
+    title: "ขายส่งกระเป๋าสะพายข้างและกระเป๋าผ้า Tote 20 ใบ",
+    amountThb: 5400,
+    paymentMethod: "โอนธนาคาร",
+    referenceCode: "WS-882",
+    note: "ลูกค้าร้านต่างจังหวัดโอนมัดจำครบแล้ว",
+  },
+  {
+    id: "acc-6",
+    date: daysAgoIso(2),
+    type: "expense",
+    category: "สั่งซื้อสต็อกกระเป๋า",
+    title: "สั่งเติมสต็อกกระเป๋าเป้กันน้ำ + กระเป๋าสตางค์ ล็อตใหม่",
+    amountThb: 3250,
+    paymentMethod: "โอนธนาคาร",
+    referenceCode: "PO-CN204",
+  },
+  {
+    id: "acc-7",
+    date: daysAgoIso(2),
+    type: "expense",
+    category: "ค่าขนส่งนำเข้าจีน-ไทย",
+    title: "ค่าชิปปิ้งขนส่งจีน-ไทย (ทางรถ 1 ลัง)",
+    amountThb: 890,
+    paymentMethod: "โอนธนาคาร",
+    referenceCode: "FRT-991",
+  },
+  {
+    id: "acc-8",
+    date: daysAgoIso(3),
+    type: "income",
+    category: "ขายออนไลน์ (Shopee/TikTok/LINE)",
+    title: "สรุปยอดโอนจาก TikTok Shop & Shopee ประจำวัน",
+    amountThb: 4850,
+    paymentMethod: "แพลตฟอร์ม (Shopee/TikTok)",
+    referenceCode: "SET-2411",
+  },
+  {
+    id: "acc-9",
+    date: daysAgoIso(3),
+    type: "expense",
+    category: "ค่าโฆษณา / ยิงแอด",
+    title: "ค่ายิงโฆษณา TikTok & Facebook โปรโมชันกระเป๋า",
+    amountThb: 650,
+    paymentMethod: "บัตรเครดิต",
+    referenceCode: "ADS-031",
+  },
+  {
+    id: "acc-10",
+    date: daysAgoIso(4),
+    type: "expense",
+    category: "ค่ากล่อง / อุปกรณ์แพ็ค",
+    title: "ซื้อกล่องพัสดุ ถุงกันฝุ่นกระเป๋า และบับเบิลกันกระแทก",
+    amountThb: 540,
+    paymentMethod: "เงินสด",
+    referenceCode: "PKG-110",
   },
 ];
 

@@ -10,7 +10,7 @@ import {
   RoleMode,
   StockApprovalRequest,
 } from "../types";
-import { readImageAsDataUrl } from "../utils/image";
+import { uploadPhoto } from "../utils/image";
 import {
   buildLowStockLineMessage,
   getLineDirectChatUrl,
@@ -62,6 +62,8 @@ export function AddProductModal({
   const [sellPrice, setSellPrice] = useState("159");
   const [lowThreshold, setLowThreshold] = useState("15");
   const [imageUrl, setImageUrl] = useState<string | undefined>(undefined);
+  const [isUploadingMainPhoto, setIsUploadingMainPhoto] = useState(false);
+  const [uploadingColorIdx, setUploadingColorIdx] = useState<number | null>(null);
   const [selectedColors, setSelectedColors] = useState<ProductColorVariant[]>(
     []
   );
@@ -77,12 +79,18 @@ export function AddProductModal({
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setIsUploadingMainPhoto(true);
     try {
-      const dataUrl = await readImageAsDataUrl(file);
-      setImageUrl(dataUrl);
+      const result = await uploadPhoto(file, {
+        folder: "products",
+        maxDimension: 960,
+        maxFallbackChars: 135000,
+      });
+      setImageUrl(result.url);
     } catch {
       // ignore invalid file
     } finally {
+      setIsUploadingMainPhoto(false);
       if (cameraInputRef.current) cameraInputRef.current.value = "";
       if (galleryInputRef.current) galleryInputRef.current.value = "";
     }
@@ -146,16 +154,22 @@ export function AddProductModal({
     const file = e.target.files?.[0];
     const targetIdx = activeColorIndexRef.current;
     if (!file || targetIdx === null) return;
+    setUploadingColorIdx(targetIdx);
     try {
-      const dataUrl = await readImageAsDataUrl(file, 260, 40000);
+      const result = await uploadPhoto(file, {
+        folder: "colors",
+        maxDimension: 420,
+        maxFallbackChars: 40000,
+      });
       setSelectedColors((prev) =>
         prev.map((c, idx) =>
-          idx === targetIdx ? { ...c, imageUrl: dataUrl } : c
+          idx === targetIdx ? { ...c, imageUrl: result.url } : c
         )
       );
     } catch {
       // ignore invalid file
     } finally {
+      setUploadingColorIdx(null);
       activeColorIndexRef.current = null;
       if (colorCameraInputRef.current) colorCameraInputRef.current.value = "";
       if (colorGalleryInputRef.current) colorGalleryInputRef.current.value = "";
@@ -239,13 +253,16 @@ export function AddProductModal({
             </div>
             <div className="flex-1 min-w-0 flex flex-col gap-1.5">
               <span className="text-[12px] font-semibold text-on-surface">
-                รูปภาพสินค้าเข้าใหม่
+                {isUploadingMainPhoto
+                  ? "กำลังอัปโหลดรูปภาพออนไลน์..."
+                  : "รูปภาพสินค้าเข้าใหม่"}
               </span>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
+                  disabled={isUploadingMainPhoto}
                   onClick={() => cameraInputRef.current?.click()}
-                  className="h-9 px-3 rounded-lg bg-primary text-on-primary hover:bg-primary-dim text-[12px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="h-9 px-3 rounded-lg bg-primary text-on-primary hover:bg-primary-dim text-[12px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
                 >
                   <span className="material-symbols-outlined text-[16px]">
                     photo_camera
@@ -254,8 +271,9 @@ export function AddProductModal({
                 </button>
                 <button
                   type="button"
+                  disabled={isUploadingMainPhoto}
                   onClick={() => galleryInputRef.current?.click()}
-                  className="h-9 px-3 rounded-lg bg-primary-fixed text-on-primary-fixed hover:bg-primary-fixed-dim text-[12px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="h-9 px-3 rounded-lg bg-primary-fixed text-on-primary-fixed hover:bg-primary-fixed-dim text-[12px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
                 >
                   <span className="material-symbols-outlined text-[16px]">
                     photo_library
@@ -569,7 +587,11 @@ export function AddProductModal({
                             </span>
                           </div>
                           <p className="text-[10px] text-on-surface-variant">
-                            {color.imageUrl ? "แนบรูปสีแล้ว" : "ยังไม่มีรูปสี"}
+                            {uploadingColorIdx === idx
+                              ? "กำลังอัปโหลดรูป..."
+                              : color.imageUrl
+                                ? "แนบรูปสีแล้ว"
+                                : "ยังไม่มีรูปสี"}
                           </p>
                         </div>
                       </div>
@@ -836,7 +858,7 @@ interface EditProductModalProps {
   onUpdateProductDetails: (
     updated: Pick<
       ProductItem,
-      "id" | "name" | "sku" | "category" | "sellPriceThb" | "lowThreshold"
+      "id" | "name" | "sku" | "category" | "sellPriceThb" | "lowThreshold" | "imageUrl"
     >
   ) => void;
   onRequestStockChange: (
@@ -879,6 +901,8 @@ export function EditProductModal({
   onRequestStockChange,
   onSwitchToOwnerAuth,
 }: EditProductModalProps) {
+  const editCameraInputRef = useRef<HTMLInputElement>(null);
+  const editGalleryInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(product.name);
   const [sku, setSku] = useState(product.sku);
   const [category, setCategory] = useState(
@@ -890,6 +914,8 @@ export function EditProductModal({
   );
   const [landedCost, setLandedCost] = useState(String(product.landedCostThb));
   const [stock, setStock] = useState(String(product.stock));
+  const [imageUrl, setImageUrl] = useState<string | undefined>(product.imageUrl);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [reason, setReason] = useState("ตรวจนับสต็อกจริงหน้าร้าน");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -904,6 +930,28 @@ export function EditProductModal({
   const categoryOptions = categories.includes(category)
     ? categories
     : [category, ...categories].filter(Boolean);
+
+  const handleEditPhotoUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingPhoto(true);
+    try {
+      const result = await uploadPhoto(file, {
+        folder: "products",
+        maxDimension: 960,
+        maxFallbackChars: 135000,
+      });
+      setImageUrl(result.url);
+    } catch {
+      // ignore invalid file
+    } finally {
+      setIsUploadingPhoto(false);
+      if (editCameraInputRef.current) editCameraInputRef.current.value = "";
+      if (editGalleryInputRef.current) editGalleryInputRef.current.value = "";
+    }
+  };
 
   const handleSaveDetailsOrOwner = (e: React.FormEvent) => {
     e.preventDefault();
@@ -922,6 +970,7 @@ export function EditProductModal({
         lowThreshold: parsedThreshold,
         landedCostThb: Math.max(0, parseFloat(landedCost) || 0),
         stock: parsedStock,
+        imageUrl,
         updatedAt: "เมื่อสักครู่",
       });
       onClose();
@@ -933,6 +982,7 @@ export function EditProductModal({
         category: category || product.category,
         sellPriceThb: parsedPrice,
         lowThreshold: parsedThreshold,
+        imageUrl,
       });
     }
   };
@@ -1017,6 +1067,67 @@ export function EditProductModal({
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container">
                 {role === "owner" ? "แก้ไขได้ทั้งหมด" : "พนักงานแก้ไขข้อมูลได้"}
               </span>
+            </div>
+
+            {/* Product Photo Upload Row */}
+            <div className="flex items-center gap-3 p-2.5 rounded-xl bg-surface-container-lowest border border-outline-variant/35">
+              <div className="w-14 h-14 rounded-lg bg-surface-container overflow-hidden flex items-center justify-center shrink-0 border border-outline-variant/30">
+                {imageUrl ? (
+                  <ResilientImage
+                    src={imageUrl}
+                    alt={name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="material-symbols-outlined text-[24px] text-on-surface-variant">
+                    image
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                <span className="text-[11.5px] font-semibold text-on-surface">
+                  {isUploadingPhoto ? "กำลังอัปโหลดรูปภาพ..." : "รูปภาพสินค้า"}
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    disabled={isUploadingPhoto}
+                    onClick={() => editCameraInputRef.current?.click()}
+                    className="h-8 px-2.5 rounded-lg bg-primary text-on-primary hover:bg-primary-dim text-[11.5px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">
+                      photo_camera
+                    </span>
+                    <span>ถ่ายรูป</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isUploadingPhoto}
+                    onClick={() => editGalleryInputRef.current?.click()}
+                    className="h-8 px-2.5 rounded-lg bg-primary-fixed text-on-primary-fixed hover:bg-primary-fixed-dim text-[11.5px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">
+                      photo_library
+                    </span>
+                    <span>เปลี่ยนรูป</span>
+                  </button>
+                </div>
+                <input
+                  ref={editCameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleEditPhotoUpload}
+                />
+                <input
+                  ref={editGalleryInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleEditPhotoUpload}
+                />
+              </div>
             </div>
 
             <div>
@@ -1607,6 +1718,7 @@ export function DeliveryConfirmModal({
     String(order.cashReceivedThb ?? order.totalThb)
   );
   const [note, setNote] = useState<string>(order.deliveryNote || "");
+  const [isUploadingProof, setIsUploadingProof] = useState(false);
   const [error, setError] = useState<string>("");
 
   const parsedCash = parseFloat(cashReceived) || 0;
@@ -1616,13 +1728,19 @@ export function DeliveryConfirmModal({
     if (isLocked) return;
     const file = e.target.files?.[0];
     if (!file) return;
+    setIsUploadingProof(true);
     try {
-      const dataUrl = await readImageAsDataUrl(file);
-      setProofImage(dataUrl);
+      const result = await uploadPhoto(file, {
+        folder: "delivery",
+        maxDimension: 1024,
+        maxFallbackChars: 135000,
+      });
+      setProofImage(result.url);
       setError("");
     } catch {
-      setError("ไม่สามารถอ่านไฟล์รูปภาพได้ กรุณาลองใหม่");
+      setError("ไม่สามารถอัปโหลดไฟล์รูปภาพได้ กรุณาลองใหม่");
     } finally {
+      setIsUploadingProof(false);
       if (cameraInputRef.current) cameraInputRef.current.value = "";
       if (galleryInputRef.current) galleryInputRef.current.value = "";
     }
@@ -1801,9 +1919,11 @@ export function DeliveryConfirmModal({
           {/* Camera / Proof Photo Box */}
           <div className="flex flex-col gap-2">
             <label className="text-[12px] font-medium text-on-surface-variant">
-              {method === "photo_proof"
-                ? "ถ่ายรูปพัสดุ / หลักฐานการจัดส่ง *"
-                : "ถ่ายรูปหลักฐานรับเงินสด / มอบสินค้า (ไม่บังคับ)"}
+              {isUploadingProof
+                ? "กำลังอัปโหลดรูปภาพไปยังระบบออนไลน์..."
+                : method === "photo_proof"
+                  ? "ถ่ายรูปพัสดุ / หลักฐานการจัดส่ง *"
+                  : "ถ่ายรูปหลักฐานรับเงินสด / มอบสินค้า (ไม่บังคับ)"}
             </label>
 
             {proofImage ? (

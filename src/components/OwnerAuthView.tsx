@@ -23,6 +23,16 @@ interface OwnerAuthViewProps {
   onDeleteApprovalRequest: (reqId: string) => void;
   onClearAllApprovals: () => void;
   onNotify: (msg: string, icon?: string) => void;
+  cloudStatus: "connected" | "connecting" | "local";
+  cloudUserEmail?: string | null;
+  isSyncingCloudAll?: boolean;
+  liveStatus: "connected" | "connecting" | "reconnecting" | "offline";
+  onlineDevicesCount: number;
+  roomId: string;
+  onOpenMultiDevice: () => void;
+  onConnectCloud: () => void;
+  onDisconnectCloud: () => void;
+  onSyncAllToCloud?: () => void;
 }
 
 export function OwnerAuthView({
@@ -47,6 +57,16 @@ export function OwnerAuthView({
   onDeleteApprovalRequest,
   onClearAllApprovals,
   onNotify,
+  cloudStatus,
+  cloudUserEmail,
+  isSyncingCloudAll = false,
+  liveStatus,
+  onlineDevicesCount,
+  roomId,
+  onOpenMultiDevice,
+  onConnectCloud,
+  onDisconnectCloud,
+  onSyncAllToCloud,
 }: OwnerAuthViewProps) {
   // Always open on the Owner tab so tapping "เข้าเจ้าของร้าน" shows the PIN keypad immediately
   const [selectedTab, setSelectedTab] = useState<RoleMode>("owner");
@@ -833,69 +853,193 @@ export function OwnerAuthView({
           )}
         </div>
 
-        {/* Permission Summary Card */}
-        <div className="lg:col-span-6 bg-surface-container-low rounded-xl p-4 flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px] text-primary">
-              verified_user
-            </span>
-            <h3 className="text-[16px] font-semibold text-on-surface">
-              สรุปสิทธิ์การใช้งาน
-            </h3>
-          </div>
-
-          <div className="flex flex-col gap-2.5">
-            <div
-              className={`bg-surface-container-lowest rounded-lg p-3.5 flex items-start gap-3 shadow-sm border ${
-                role === "staff" ? "border-secondary/40" : "border-transparent"
-              }`}
-            >
-              <div className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0 mt-0.5">
-                <span className="material-symbols-outlined text-[18px]">
-                  qr_code_scanner
-                </span>
-              </div>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px] font-semibold text-on-surface">
-                    สิทธิ์พนักงาน
+        {/* Right Column: Online Cloud Sync + Permission Summary */}
+        <div className="lg:col-span-6 flex flex-col gap-3">
+          {/* Online Cloud Sync Card */}
+          <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/40 shadow-sm flex flex-col gap-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    cloudStatus === "connected"
+                      ? "bg-secondary-container text-on-secondary-container"
+                      : "bg-primary-fixed text-on-primary-fixed"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[22px]">
+                    {cloudStatus === "connected"
+                      ? "cloud_done"
+                      : cloudStatus === "connecting"
+                        ? "sync"
+                        : "cloud_upload"}
                   </span>
-                  {role === "staff" && (
-                    <span className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-semibold">
-                      กำลังใช้งาน
-                    </span>
-                  )}
                 </div>
-                <p className="text-[13px] text-on-surface-variant mt-0.5">
-                  เปิดใช้งานได้ทันทีโดยไม่ต้องใส่รหัส: เพิ่มสินค้า, จัดการออเดอร์, ถ่ายรูปยืนยันจัดส่ง (ซ่อนต้นทุนและเรทเงิน)
-                </p>
+                <div className="min-w-0">
+                  <h3 className="text-[15px] font-bold text-on-surface">
+                    ใช้งานพร้อมกันหลายเครื่อง &amp; ซิงก์คลาวด์
+                  </h3>
+                  <p className="text-[12px] text-on-surface-variant truncate">
+                    {liveStatus === "connected"
+                      ? `ออนไลน์สด ${onlineDevicesCount} เครื่อง (ห้อง ${roomId})${
+                          cloudStatus === "connected"
+                            ? ` · คลาวด์: ${cloudUserEmail || "Google"}`
+                            : ""
+                        }`
+                      : cloudStatus === "connected"
+                        ? `เชื่อมต่อคลาวด์แล้ว (${cloudUserEmail || "Firebase Cloud"})`
+                        : "กำลังเชื่อมต่อซิงก์เรียลไทม์หลายเครื่อง..."}
+                  </p>
+                </div>
               </div>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold shrink-0 ${
+                  liveStatus === "connected" || cloudStatus === "connected"
+                    ? "bg-secondary-container text-on-secondary-container"
+                    : "bg-surface-container text-on-surface-variant"
+                }`}
+              >
+                {liveStatus === "connected"
+                  ? `สด · ${onlineDevicesCount} เครื่อง`
+                  : cloudStatus === "connected"
+                    ? "คลาวด์"
+                    : "กำลังเชื่อม"}
+              </span>
             </div>
 
-            <div
-              className={`bg-surface-container-lowest rounded-lg p-3.5 flex items-start gap-3 shadow-sm border ${
-                role === "owner" ? "border-primary/40" : "border-transparent"
-              }`}
-            >
-              <div className="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0 mt-0.5">
+            <p className="text-[12px] text-on-surface-variant leading-relaxed">
+              หลายเครื่อง (มือถือพนักงาน แท็บเล็ต โน้ตบุ๊ก) เปิดลิงก์เดียวกันแล้วทำงานพร้อมกันได้ทันทีแบบเรียลไทม์ โดยสต็อก ออเดอร์ การแพ็ค คำขออนุมัติ และบัญชีจะอัปเดตตรงกันทุกเครื่อง และแนะนำให้เชื่อมบัญชี Google อย่างน้อย 1 เครื่องเพื่อสำรองข้อมูลถาวรบนคลาวด์
+            </p>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={onOpenMultiDevice}
+                className="h-10 px-4 rounded-xl bg-secondary text-on-secondary hover:opacity-90 text-[13px] font-semibold flex items-center gap-1.5 shadow-sm transition-opacity cursor-pointer"
+              >
                 <span className="material-symbols-outlined text-[18px]">
-                  key
+                  devices
                 </span>
-              </div>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px] font-semibold text-on-surface">
-                    สิทธิ์เจ้าของร้าน ({ownerName})
-                  </span>
-                  {role === "owner" && (
-                    <span className="px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[10px] font-semibold">
-                      กำลังใช้งาน
-                    </span>
+                <span>ดูเครื่องที่ออนไลน์ / คัดลอกลิงก์เชิญ</span>
+              </button>
+
+              {cloudStatus === "connected" ? (
+                <>
+                  {onSyncAllToCloud && (
+                    <button
+                      type="button"
+                      disabled={isSyncingCloudAll}
+                      onClick={onSyncAllToCloud}
+                      className="h-10 px-4 rounded-xl bg-primary hover:bg-primary-dim text-on-primary text-[12.5px] font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      <span
+                        className={`material-symbols-outlined text-[17px] ${
+                          isSyncingCloudAll ? "animate-spin" : ""
+                        }`}
+                      >
+                        {isSyncingCloudAll ? "progress_activity" : "cloud_sync"}
+                      </span>
+                      <span>
+                        {isSyncingCloudAll
+                          ? "กำลังซิงก์ขึ้น Google Cloud..."
+                          : "ซิงก์ข้อมูลทั้งหมดขึ้น Google Cloud"}
+                      </span>
+                    </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={onDisconnectCloud}
+                    className="h-10 px-4 rounded-xl bg-surface-container hover:bg-error-container hover:text-error text-on-surface text-[12.5px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">
+                      cloud_off
+                    </span>
+                    <span>ตัดคลาวด์ Google</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={cloudStatus === "connecting"}
+                  onClick={onConnectCloud}
+                  className="h-10 px-4 rounded-xl bg-primary hover:bg-primary-dim text-on-primary text-[13px] font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    cloud_sync
+                  </span>
+                  <span>
+                    {cloudStatus === "connecting"
+                      ? "กำลังเชื่อมต่อ..."
+                      : "เชื่อมต่อ & สำรองขึ้น Google Cloud"}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Permission Summary Card */}
+          <div className="bg-surface-container-low rounded-xl p-4 flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                verified_user
+              </span>
+              <h3 className="text-[16px] font-semibold text-on-surface">
+                สรุปสิทธิ์การใช้งาน
+              </h3>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              <div
+                className={`bg-surface-container-lowest rounded-lg p-3.5 flex items-start gap-3 shadow-sm border ${
+                  role === "staff" ? "border-secondary/40" : "border-transparent"
+                }`}
+              >
+                <div className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0 mt-0.5">
+                  <span className="material-symbols-outlined text-[18px]">
+                    qr_code_scanner
+                  </span>
                 </div>
-                <p className="text-[13px] text-on-surface-variant mt-0.5">
-                  ปลดล็อกด้วยรหัสผ่าน 4 หลัก: อัปโหลดและสแกนบิล, ดูต้นทุนจริง, ตั้งค่าเรทเงิน, อนุมัติ/แก้ไขจำนวนสต็อกได้เต็มรูปแบบ
-                </p>
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[14px] font-semibold text-on-surface">
+                      สิทธิ์พนักงาน
+                    </span>
+                    {role === "staff" && (
+                      <span className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-semibold">
+                        กำลังใช้งาน
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[13px] text-on-surface-variant mt-0.5">
+                    เปิดใช้งานได้ทันทีโดยไม่ต้องใส่รหัส: เพิ่มสินค้า, จัดการออเดอร์, ถ่ายรูปยืนยันจัดส่ง (ซ่อนต้นทุนและเรทเงิน)
+                  </p>
+                </div>
+              </div>
+
+              <div
+                className={`bg-surface-container-lowest rounded-lg p-3.5 flex items-start gap-3 shadow-sm border ${
+                  role === "owner" ? "border-primary/40" : "border-transparent"
+                }`}
+              >
+                <div className="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0 mt-0.5">
+                  <span className="material-symbols-outlined text-[18px]">
+                    key
+                  </span>
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[14px] font-semibold text-on-surface">
+                      สิทธิ์เจ้าของร้าน ({ownerName})
+                    </span>
+                    {role === "owner" && (
+                      <span className="px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[10px] font-semibold">
+                        กำลังใช้งาน
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[13px] text-on-surface-variant mt-0.5">
+                    ปลดล็อกด้วยรหัสผ่าน 4 หลัก: จัดการระบบบัญชีรายรับ-รายจ่าย, วิเคราะห์กำไรและต้นทุนจริง, อนุมัติ/แก้ไขจำนวนสต็อก และลบข้อมูลได้เต็มรูปแบบ
+                  </p>
+                </div>
               </div>
             </div>
           </div>

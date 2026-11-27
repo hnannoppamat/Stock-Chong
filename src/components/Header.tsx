@@ -18,6 +18,11 @@ interface HeaderProps {
   onDeleteNotification: (notiId: string) => void;
   onClearAllNotifications: () => void;
   onSelectNotification: (noti: AppNotification) => void;
+  cloudStatus: "connected" | "connecting" | "local";
+  cloudUserEmail?: string | null;
+  liveStatus: "connected" | "connecting" | "reconnecting" | "offline";
+  onlineDevicesCount: number;
+  onCloudSyncClick: () => void;
 }
 
 export function Header({
@@ -37,6 +42,11 @@ export function Header({
   onDeleteNotification,
   onClearAllNotifications,
   onSelectNotification,
+  cloudStatus,
+  cloudUserEmail,
+  liveStatus,
+  onlineDevicesCount,
+  onCloudSyncClick,
 }: HeaderProps) {
   const [openNoti, setOpenNoti] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -72,7 +82,7 @@ export function Header({
       badge: lowStockProducts.length > 0 ? lowStockProducts.length : undefined,
     },
     ...(role === "owner"
-      ? [{ id: "ai-scanner" as const, label: "สแกนบิล", icon: "document_scanner" }]
+      ? [{ id: "accounting" as const, label: "บัญชี", icon: "account_balance_wallet" }]
       : []),
     { id: "orders", label: "ออเดอร์", icon: "receipt_long" },
     { id: "customers", label: "ลูกค้า", icon: "group" },
@@ -143,6 +153,52 @@ export function Header({
         </nav>
 
         <div className="flex items-center gap-1.5 shrink-0 relative" ref={popoverRef}>
+          <button
+            type="button"
+            onClick={onCloudSyncClick}
+            title={
+              liveStatus === "connected"
+                ? `ออนไลน์พร้อมกัน ${onlineDevicesCount} เครื่อง${
+                    cloudStatus === "connected"
+                      ? ` · สำรองคลาวด์แล้ว (${cloudUserEmail || "Google"})`
+                      : ""
+                  }`
+                : "จัดการการใช้งานพร้อมกันหลายเครื่อง & ซิงก์คลาวด์"
+            }
+            className={`h-9 px-2.5 rounded-full text-[11.5px] font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+              liveStatus === "connected" || cloudStatus === "connected"
+                ? "bg-secondary-container/75 text-on-secondary-container border-secondary/35 hover:bg-secondary-container"
+                : liveStatus === "connecting" || liveStatus === "reconnecting"
+                  ? "bg-surface-container text-on-surface-variant border-outline-variant/40"
+                  : "bg-surface-container-lowest text-primary border-primary/35 hover:bg-primary-fixed/40"
+            }`}
+          >
+            <span className="relative flex h-2 w-2 shrink-0">
+              {liveStatus === "connected" && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-60" />
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  liveStatus === "connected"
+                    ? "bg-secondary"
+                    : liveStatus === "connecting" || liveStatus === "reconnecting"
+                      ? "bg-amber-500"
+                      : "bg-outline"
+                }`}
+              />
+            </span>
+            <span className="material-symbols-outlined text-[16px]">
+              {cloudStatus === "connected" ? "cloud_done" : "devices"}
+            </span>
+            <span className="tabular-nums">
+              {liveStatus === "connected"
+                ? `${onlineDevicesCount} เครื่อง`
+                : liveStatus === "connecting" || liveStatus === "reconnecting"
+                  ? "กำลังเชื่อม..."
+                  : "หลายเครื่อง"}
+            </span>
+          </button>
+
           {role === "owner" ? (
             <button
               type="button"

@@ -13,7 +13,7 @@ interface DashboardOverviewWidgetsProps {
   onQuickCreateOrderForProduct: (product: ProductItem) => void;
   onConfirmPack: (orderId: string) => void;
   onMarkReadyToShip: (orderId: string) => void;
-  onNavigateScanner: () => void;
+  onNavigateAccounting: () => void;
   onQuickCreateOrder: () => void;
   onFilterLowStockInInventory: () => void;
   onDeleteOrder: (orderId: string) => void;
@@ -143,7 +143,7 @@ export function DashboardOverviewWidgets({
   onQuickCreateOrderForProduct,
   onConfirmPack,
   onMarkReadyToShip,
-  onNavigateScanner,
+  onNavigateAccounting,
   onQuickCreateOrder,
   onFilterLowStockInInventory,
   onDeleteOrder,
@@ -461,10 +461,10 @@ export function DashboardOverviewWidgets({
             {role === "owner" && (
               <button
                 type="button"
-                onClick={onNavigateScanner}
+                onClick={onNavigateAccounting}
                 className="h-10 px-4 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:bg-primary-dim transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                สแกนบิลเติมสต็อก
+                เปิดระบบบัญชี
               </button>
             )}
           </div>
@@ -1115,14 +1115,14 @@ export function DashboardOverviewWidgets({
                         type="button"
                         onClick={() => {
                           setSelectedAlertProductId(null);
-                          onNavigateScanner();
+                          onNavigateAccounting();
                         }}
                         className="h-10 px-3 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-on-surface hover:text-primary text-[12px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
                       >
                         <span className="material-symbols-outlined text-[16px]">
-                          document_scanner
+                          account_balance_wallet
                         </span>
-                        <span className="hidden sm:inline">สแกนบิล</span>
+                        <span className="hidden sm:inline">ระบบบัญชี</span>
                       </button>
                     )}
                     {role === "owner" && (

@@ -18,6 +18,19 @@
           "maxLength": 80,
           "description": "Display name of the store owner."
         },
+        "ownerPin": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 4,
+          "pattern": "^[0-9]{4}$",
+          "description": "4-digit owner mode PIN code."
+        },
+        "ownerLineId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Owner LINE ID for automated stock and order notifications."
+        },
         "roleMode": {
           "type": "string",
           "enum": ["owner", "staff"],
@@ -355,6 +368,11 @@
           "enum": ["pending", "approved", "rejected"],
           "description": "Approval request status."
         },
+        "notifiedLineId": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Optional LINE ID notified for this stock adjustment request."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -510,6 +528,158 @@
         "updatedAt"
       ]
     },
+    "AccountingEntry": {
+      "title": "AccountingEntry",
+      "description": "Owner-only accounting ledger record tracking shop income and expenses.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the workspace owner."
+        },
+        "date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Entry date in YYYY-MM-DD format."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["income", "expense"],
+          "description": "Transaction direction: income or expense."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Accounting category."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Description of the accounting entry."
+        },
+        "amountThb": {
+          "type": "number",
+          "description": "Amount in THB (> 0)."
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["เงินสด", "โอนธนาคาร", "พร้อมเพย์", "บัตรเครดิต", "แพลตฟอร์ม (Shopee/TikTok)"],
+          "description": "Payment method used."
+        },
+        "referenceCode": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Optional invoice or order reference code."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional additional note."
+        },
+        "sourceOrderId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Optional linked order ID if synced from an order."
+        },
+        "receiptImageUrl": {
+          "type": "string",
+          "maxLength": 150000,
+          "description": "Optional uploaded receipt/bill photo URL or compact thumbnail data URI."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when entry was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when entry was last updated."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "date",
+        "type",
+        "category",
+        "title",
+        "amountThb",
+        "paymentMethod",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DeviceSession": {
+      "title": "DeviceSession",
+      "description": "Active device presence record for multi-device simultaneous access in a store workspace.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the workspace owner."
+        },
+        "deviceName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Human-readable label for the connected device."
+        },
+        "deviceType": {
+          "type": "string",
+          "enum": ["mobile", "tablet", "desktop"],
+          "description": "Device form factor."
+        },
+        "roleMode": {
+          "type": "string",
+          "enum": ["owner", "staff"],
+          "description": "Active role mode on this device."
+        },
+        "roomId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Active real-time sync room code."
+        },
+        "lastActiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the device's latest heartbeat."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when session started."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when session was last updated."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "deviceName",
+        "deviceType",
+        "roleMode",
+        "roomId",
+        "lastActiveAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
     "AdminRecord": {
       "title": "AdminRecord",
       "description": "Server-managed administrator role record.",
@@ -550,6 +720,14 @@
     "/users/{userId}/customers/{customerId}": {
       "schema": { "$ref": "#/entities/Customer" },
       "description": "Customer profiles and contact information belonging to a user's store workspace."
+    },
+    "/users/{userId}/accounting/{entryId}": {
+      "schema": { "$ref": "#/entities/AccountingEntry" },
+      "description": "Accounting ledger entries belonging to a user's store workspace."
+    },
+    "/users/{userId}/devices/{deviceId}": {
+      "schema": { "$ref": "#/entities/DeviceSession" },
+      "description": "Active connected devices for multi-device simultaneous presence."
     },
     "/admins/{adminId}": {
       "schema": { "$ref": "#/entities/AdminRecord" },

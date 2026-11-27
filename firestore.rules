@@ -55,12 +55,14 @@ service cloud.firestore {
           'autoSave', 'seeded', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'uid', 'ownerName', 'roleMode', 'categories',
+          'uid', 'ownerName', 'ownerPin', 'ownerLineId', 'roleMode', 'categories',
           'exchangeRate', 'freightCost', 'splitByQty',
           'autoSave', 'seeded', 'createdAt', 'updatedAt'
         ]) &&
         data.uid is string && data.uid == userId && isValidId(data.uid) &&
         data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80 &&
+        (!('ownerPin' in data) || (data.ownerPin is string && data.ownerPin.size() == 4 && data.ownerPin.matches('^[0-9]{4}$'))) &&
+        isOptionalString(data, 'ownerLineId', 64) &&
         data.roleMode is string && data.roleMode in ['owner', 'staff'] &&
         data.categories is list && data.categories.size() <= 40 &&
         (data.categories.size() == 0 || (data.categories[0] is string && data.categories[0].size() >= 1 && data.categories[0].size() <= 80)) &&
@@ -147,7 +149,8 @@ service cloud.firestore {
         data.keys().hasOnly([
           'ownerUid', 'productId', 'productName', 'sku',
           'requestedBy', 'currentStock', 'requestedStock',
-          'reason', 'createdAtLabel', 'status', 'createdAt', 'updatedAt'
+          'reason', 'createdAtLabel', 'status', 'notifiedLineId',
+          'createdAt', 'updatedAt'
         ]) &&
         data.ownerUid is string && data.ownerUid == userId && isValidId(data.ownerUid) &&
         data.productId is string && isValidId(data.productId) &&
@@ -159,6 +162,7 @@ service cloud.firestore {
         data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 300 &&
         data.createdAtLabel is string && data.createdAtLabel.size() >= 1 && data.createdAtLabel.size() <= 60 &&
         data.status is string && data.status in ['pending', 'approved', 'rejected'] &&
+        isOptionalString(data, 'notifiedLineId', 64) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -202,6 +206,53 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidAccountingEntry(data, userId) {
+      return data.keys().hasAll([
+          'ownerUid', 'date', 'type', 'category', 'title',
+          'amountThb', 'paymentMethod', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid', 'date', 'type', 'category', 'title',
+          'amountThb', 'paymentMethod', 'referenceCode', 'note',
+          'sourceOrderId', 'receiptImageUrl',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerUid is string && data.ownerUid == userId && isValidId(data.ownerUid) &&
+        data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.type is string && data.type in ['income', 'expense'] &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.amountThb is number && data.amountThb > 0 && data.amountThb <= 100000000 &&
+        data.paymentMethod is string && data.paymentMethod in [
+          'เงินสด', 'โอนธนาคาร', 'พร้อมเพย์', 'บัตรเครดิต', 'แพลตฟอร์ม (Shopee/TikTok)'
+        ] &&
+        isOptionalString(data, 'referenceCode', 64) &&
+        isOptionalString(data, 'note', 500) &&
+        (!('sourceOrderId' in data) || isValidId(data.sourceOrderId)) &&
+        isOptionalString(data, 'receiptImageUrl', 150000) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDeviceSession(data, userId) {
+      return data.keys().hasAll([
+          'ownerUid', 'deviceName', 'deviceType', 'roleMode',
+          'roomId', 'lastActiveAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerUid', 'deviceName', 'deviceType', 'roleMode',
+          'roomId', 'lastActiveAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerUid is string && data.ownerUid == userId && isValidId(data.ownerUid) &&
+        data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 80 &&
+        data.deviceType is string && data.deviceType in ['mobile', 'tablet', 'desktop'] &&
+        data.roleMode is string && data.roleMode in ['owner', 'staff'] &&
+        data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 64 && data.roomId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.lastActiveAt is timestamp &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     // --- Admin Records ---
     match /admins/{adminId} {
       allow get: if isSignedIn() && isValidId(adminId) && request.auth.uid == adminId;
@@ -228,7 +279,7 @@ service cloud.firestore {
             request.auth.uid == userId &&
             // Action: Update workspace settings
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'ownerName', 'roleMode', 'categories',
+              'ownerName', 'ownerPin', 'ownerLineId', 'roleMode', 'categories',
               'exchangeRate', 'freightCost', 'splitByQty',
               'autoSave', 'seeded', 'updatedAt'
             ])
@@ -260,7 +311,7 @@ service cloud.firestore {
               request.auth.uid == userId &&
               // Action: Update stock, pricing, or product metadata
               incoming().diff(existing()).affectedKeys().hasOnly([
-                'name', 'category', 'stock', 'lowThreshold',
+                'name', 'sku', 'category', 'stock', 'lowThreshold',
                 'landedCostThb', 'cnyUnitPrice', 'freightPerUnitThb',
                 'sellPriceThb', 'imageUrl', 'colors', 'updatedAtLabel', 'updatedAt'
               ]) &&
@@ -347,7 +398,7 @@ service cloud.firestore {
           );
         allow delete: if isSignedIn() &&
           isValidId(userId) && isValidId(orderId) &&
-          isAdmin() &&
+          (request.auth.uid == userId || isAdmin()) &&
           workspaceExists(userId);
       }
 
@@ -383,7 +434,10 @@ service cloud.firestore {
               workspaceExists(userId)
             )
           );
-        allow delete: if false;
+        allow delete: if isSignedIn() &&
+          isValidId(userId) && isValidId(approvalId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
       }
 
       // --- Notifications Subcollection ---
@@ -451,6 +505,80 @@ service cloud.firestore {
           );
         allow delete: if isSignedIn() &&
           isValidId(userId) && isValidId(customerId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+      }
+
+      // --- Accounting Ledger Subcollection (Owner-only financial records) ---
+      match /accounting/{entryId} {
+        allow get: if isSignedIn() &&
+          isValidId(userId) && isValidId(entryId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+        allow list: if isVerifiedOwner(userId) && existing().ownerUid == request.auth.uid;
+        allow create: if isSignedIn() &&
+          isValidId(userId) && isValidId(entryId) &&
+          request.auth.uid == userId &&
+          isValidAccountingEntry(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          workspaceExists(userId);
+        allow update: if isSignedIn() &&
+          isValidId(userId) && isValidId(entryId) &&
+          isValidAccountingEntry(incoming(), userId) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isAdmin() || (
+              request.auth.uid == userId &&
+              // Action: Update accounting entry details
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'date', 'type', 'category', 'title', 'amountThb',
+                'paymentMethod', 'referenceCode', 'note', 'sourceOrderId',
+                'receiptImageUrl', 'updatedAt'
+              ]) &&
+              workspaceExists(userId)
+            )
+          );
+        allow delete: if isSignedIn() &&
+          isValidId(userId) && isValidId(entryId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+      }
+
+      // --- Active Connected Devices Subcollection (Multi-device presence) ---
+      match /devices/{deviceId} {
+        allow get: if isSignedIn() &&
+          isValidId(userId) && isValidId(deviceId) &&
+          (request.auth.uid == userId || isAdmin()) &&
+          workspaceExists(userId);
+        allow list: if isVerifiedOwner(userId) && existing().ownerUid == request.auth.uid;
+        allow create: if isSignedIn() &&
+          isValidId(userId) && isValidId(deviceId) &&
+          request.auth.uid == userId &&
+          isValidDeviceSession(incoming(), userId) &&
+          incoming().lastActiveAt == request.time &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          workspaceExists(userId);
+        allow update: if isSignedIn() &&
+          isValidId(userId) && isValidId(deviceId) &&
+          isValidDeviceSession(incoming(), userId) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().lastActiveAt == request.time &&
+          incoming().updatedAt == request.time && (
+            isAdmin() || (
+              request.auth.uid == userId &&
+              // Action: Device heartbeat, rename, or role/room update
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'deviceName', 'deviceType', 'roleMode', 'roomId', 'lastActiveAt', 'updatedAt'
+              ]) &&
+              workspaceExists(userId)
+            )
+          );
+        allow delete: if isSignedIn() &&
+          isValidId(userId) && isValidId(deviceId) &&
           (request.auth.uid == userId || isAdmin()) &&
           workspaceExists(userId);
       }

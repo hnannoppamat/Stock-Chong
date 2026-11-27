@@ -21,7 +21,7 @@ interface InventoryViewProps {
   lastSyncedLabel: string;
   onSyncNow: () => void;
   onQuickCreateOrderForProduct: (product: ProductItem) => void;
-  onNavigateScanner: () => void;
+  onNavigateAccounting: () => void;
   onOpenAddProduct: () => void;
   onAddCategory: (categoryName: string) => void;
   onSelectProduct: (product: ProductItem) => void;
@@ -40,7 +40,7 @@ export function InventoryView({
   lastSyncedLabel,
   onSyncNow,
   onQuickCreateOrderForProduct,
-  onNavigateScanner,
+  onNavigateAccounting,
   onOpenAddProduct,
   onAddCategory,
   onSelectProduct,
@@ -205,13 +205,13 @@ export function InventoryView({
           {role === "owner" && (
             <button
               type="button"
-              onClick={onNavigateScanner}
+              onClick={onNavigateAccounting}
               className="h-10 px-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/50 text-primary hover:bg-surface-container-low text-[13px] font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
             >
               <span className="material-symbols-outlined text-[18px]">
-                document_scanner
+                account_balance_wallet
               </span>
-              <span>สแกนบิล AI</span>
+              <span>ระบบบัญชี</span>
             </button>
           )}
 

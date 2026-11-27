@@ -32,7 +32,7 @@ export function BottomNav({
       badge: lowStockCount > 0 ? lowStockCount : undefined,
     },
     ...(role === "owner"
-      ? [{ id: "ai-scanner" as const, label: "สแกนบิล", icon: "document_scanner" }]
+      ? [{ id: "accounting" as const, label: "บัญชี", icon: "account_balance_wallet" }]
       : []),
     {
       id: "orders",

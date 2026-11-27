@@ -1,7 +1,7 @@
 export type TabId =
   | "dashboard"
   | "inventory"
-  | "ai-scanner"
+  | "accounting"
   | "orders"
   | "customers"
   | "owner-auth";
@@ -26,42 +26,27 @@ export type CourierName =
   | "Kerry Express"
   | "ไปรษณีย์ไทย";
 
-export interface ScannedBillItem {
+export type AccountingEntryType = "income" | "expense";
+
+export type AccountingPaymentMethod =
+  | "เงินสด"
+  | "โอนธนาคาร"
+  | "พร้อมเพย์"
+  | "บัตรเครดิต"
+  | "แพลตฟอร์ม (Shopee/TikTok)";
+
+export interface AccountingEntry {
   id: string;
-  chineseName: string;
-  thaiName: string;
-  sku: string;
+  date: string; // YYYY-MM-DD
+  type: AccountingEntryType;
   category: string;
-  quantity: number;
-  unitPriceCny: number;
-  imageUrl?: string;
-  productType?: string;
-  material?: string;
-  colorVariants?: string[];
-  sizeSpec?: string;
-  suggestedSellPriceThb?: number;
-  aiReason?: string;
-  isNewCategory?: boolean;
-  matchedExistingSku?: string;
-  confidence?: number;
-}
-
-export interface BillAiAnalysis {
-  summary: string;
-  supplierType?: string;
-  currencyDetected?: string;
-  keyHighlights: string[];
-  suggestedNewCategories?: string[];
-  analyzedAt?: string;
-}
-
-export interface ScannedInvoice {
   title: string;
-  code: string;
-  confidence: number;
-  imageUrl: string;
-  items: ScannedBillItem[];
-  aiAnalysis?: BillAiAnalysis;
+  amountThb: number;
+  paymentMethod: AccountingPaymentMethod;
+  referenceCode?: string;
+  note?: string;
+  sourceOrderId?: string;
+  receiptImageUrl?: string;
 }
 
 export interface ProductColorVariant {
@@ -156,4 +141,57 @@ export interface Customer {
   address?: string;
   note?: string;
   createdAt: string;
+}
+
+export type DeviceFormFactor = "mobile" | "tablet" | "desktop";
+
+export interface ConnectedDevice {
+  deviceId: string;
+  deviceName: string;
+  deviceType: DeviceFormFactor;
+  roleMode: RoleMode;
+  roomId?: string;
+  connectedAt?: string;
+  lastActiveAt: number;
+  source?: "live" | "cloud";
+}
+
+export interface LiveActivityEvent {
+  id: string;
+  action: string;
+  summary: string;
+  category:
+    | "order"
+    | "stock"
+    | "accounting"
+    | "customer"
+    | "approval"
+    | "cloud"
+    | "system";
+  deviceName: string;
+  timestamp: number;
+  source: "live" | "cloud";
+}
+
+export interface LiveExchangeRate {
+  pair: string;
+  rate: number;
+  updatedAt: string;
+  source: string;
+  isFallback?: boolean;
+}
+
+export interface LiveStoreSnapshot {
+  version: number;
+  ownerName: string;
+  ownerPin: string;
+  ownerLineId: string;
+  categories: string[];
+  products: ProductItem[];
+  orders: Order[];
+  customers: Customer[];
+  approvals: StockApprovalRequest[];
+  notifications: AppNotification[];
+  accountingEntries: AccountingEntry[];
+  recentEvents?: LiveActivityEvent[];
 }

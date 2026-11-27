@@ -3,6 +3,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -12,6 +13,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import {
+  INITIAL_ACCOUNTING_ENTRIES,
   INITIAL_APPROVALS,
   INITIAL_CATEGORIES,
   INITIAL_CUSTOMERS,
@@ -22,10 +24,15 @@ import {
 } from "../data/initialData";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import {
+  AccountingEntry,
+  AccountingEntryType,
+  AccountingPaymentMethod,
   AppNotification,
+  ConnectedDevice,
   CourierName,
   Customer,
   DeliveryConfirmationMethod,
+  DeviceFormFactor,
   Order,
   OrderFulfillmentType,
   OrderItem,
@@ -39,6 +46,7 @@ import {
 // Constants synchronized verbatim with firebase-blueprint.json & firestore.rules
 export const LIMITS = {
   OWNER_NAME_MAX: 80,
+  OWNER_LINE_ID_MAX: 64,
   PRODUCT_NAME_MAX: 160,
   SKU_MAX: 64,
   CATEGORY_MAX: 80,
@@ -59,6 +67,9 @@ export const LIMITS = {
   NOTI_TITLE_MAX: 120,
   NOTI_DETAIL_MAX: 300,
   ORDER_ITEMS_MAX: 50,
+  ACC_TITLE_MAX: 200,
+  ACC_REF_MAX: 64,
+  ACC_NOTE_MAX: 500,
 } as const;
 
 const STANDARD_COURIERS: CourierName[] = [
@@ -68,9 +79,19 @@ const STANDARD_COURIERS: CourierName[] = [
   "ไปรษณีย์ไทย",
 ];
 
+const ALLOWED_PAYMENT_METHODS: AccountingPaymentMethod[] = [
+  "เงินสด",
+  "โอนธนาคาร",
+  "พร้อมเพย์",
+  "บัตรเครดิต",
+  "แพลตฟอร์ม (Shopee/TikTok)",
+];
+
 export interface WorkspaceDoc {
   uid: string;
   ownerName: string;
+  ownerPin?: string;
+  ownerLineId?: string;
   roleMode: RoleMode;
   categories: string[];
   exchangeRate: number;
@@ -78,6 +99,19 @@ export interface WorkspaceDoc {
   splitByQty: boolean;
   autoSave: boolean;
   seeded: boolean;
+}
+
+export interface LocalSeedSnapshot {
+  ownerName?: string;
+  ownerPin?: string;
+  ownerLineId?: string;
+  categories?: string[];
+  products?: ProductItem[];
+  orders?: Order[];
+  customers?: Customer[];
+  approvals?: StockApprovalRequest[];
+  notifications?: AppNotification[];
+  accountingEntries?: AccountingEntry[];
 }
 
 function clampString(value: string, maxLen: number, fallback = "-"): string {
@@ -175,9 +209,59 @@ function sanitizeOrderItems(items: OrderItem[]): OrderItem[] {
   });
 }
 
+function normalizeIsoDate(raw: string): string {
+  const trimmed = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function buildAccountingPayload(
+  uid: string,
+  entry: Omit<AccountingEntry, "id">
+): Record<string, unknown> {
+  const paymentMethod: AccountingPaymentMethod = ALLOWED_PAYMENT_METHODS.includes(
+    entry.paymentMethod
+  )
+    ? entry.paymentMethod
+    : "โอนธนาคาร";
+
+  return stripUndefined({
+    ownerUid: uid,
+    date: normalizeIsoDate(entry.date),
+    type: entry.type === "expense" ? "expense" : "income",
+    category: clampString(entry.category, LIMITS.CATEGORY_MAX, "รายรับอื่นๆ"),
+    title: clampString(entry.title, LIMITS.ACC_TITLE_MAX, "รายการบัญชี"),
+    amountThb: clampNumber(entry.amountThb, 0.01, 100000000),
+    paymentMethod,
+    referenceCode:
+      typeof entry.referenceCode === "string" && entry.referenceCode.trim()
+        ? entry.referenceCode.trim().slice(0, LIMITS.ACC_REF_MAX)
+        : undefined,
+    note:
+      typeof entry.note === "string" && entry.note.trim()
+        ? entry.note.trim().slice(0, LIMITS.ACC_NOTE_MAX)
+        : undefined,
+    sourceOrderId:
+      typeof entry.sourceOrderId === "string" && entry.sourceOrderId.trim()
+        ? sanitizeDocId(entry.sourceOrderId)
+        : undefined,
+    receiptImageUrl:
+      typeof entry.receiptImageUrl === "string" &&
+      entry.receiptImageUrl.trim().length > 0 &&
+      entry.receiptImageUrl.trim().length <= LIMITS.IMAGE_URL_MAX
+        ? entry.receiptImageUrl.trim()
+        : undefined,
+  });
+}
+
 export async function ensureUserWorkspace(
   uid: string,
-  defaultOwnerName: string
+  defaultOwnerName: string,
+  seedSnapshot?: LocalSeedSnapshot
 ): Promise<void> {
   const workspacePath = `users/${uid}`;
   const workspaceRef = doc(db, "users", uid);
@@ -219,13 +303,36 @@ export async function ensureUserWorkspace(
     return;
   }
 
+  const seedOwnerName = clampString(
+    seedSnapshot?.ownerName || defaultOwnerName,
+    LIMITS.OWNER_NAME_MAX,
+    "คุณธนวัฒน์"
+  );
+  const seedOwnerPin =
+    seedSnapshot?.ownerPin && /^\d{4}$/.test(seedSnapshot.ownerPin)
+      ? seedSnapshot.ownerPin
+      : "4145";
+  const seedOwnerLineId = clampString(
+    seedSnapshot?.ownerLineId || "Hnan145",
+    LIMITS.OWNER_LINE_ID_MAX,
+    "Hnan145"
+  );
+  const seedCategories =
+    seedSnapshot?.categories && seedSnapshot.categories.length > 0
+      ? seedSnapshot.categories
+          .slice(0, LIMITS.CATEGORIES_COUNT_MAX)
+          .map((c) => clampString(c, LIMITS.CATEGORY_MAX))
+      : INITIAL_CATEGORIES.slice(0, LIMITS.CATEGORIES_COUNT_MAX);
+
   // Step 1: Create parent workspace document first so workspaceExists(uid) passes for subcollections
   try {
     await setDoc(workspaceRef, {
       uid,
-      ownerName: clampString(defaultOwnerName, LIMITS.OWNER_NAME_MAX, "คุณธนวัฒน์"),
-      roleMode: "owner",
-      categories: INITIAL_CATEGORIES.slice(0, LIMITS.CATEGORIES_COUNT_MAX),
+      ownerName: seedOwnerName,
+      ownerPin: seedOwnerPin,
+      ownerLineId: seedOwnerLineId,
+      roleMode: "staff",
+      categories: seedCategories,
       exchangeRate: 4.95,
       freightCost: 1250,
       splitByQty: true,
@@ -238,10 +345,22 @@ export async function ensureUserWorkspace(
     handleFirestoreError(error, OperationType.CREATE, workspacePath);
   }
 
+  const seedProducts = seedSnapshot?.products ?? INITIAL_PRODUCTS;
+  const seedCustomers = seedSnapshot?.customers ?? INITIAL_CUSTOMERS;
+  const seedOrders = seedSnapshot?.orders ?? INITIAL_ORDERS;
+  const seedApprovals = seedSnapshot?.approvals ?? INITIAL_APPROVALS;
+  const seedNotifications = seedSnapshot?.notifications ?? INITIAL_NOTIFICATIONS;
+  const seedAccounting =
+    seedSnapshot?.accountingEntries ?? INITIAL_ACCOUNTING_ENTRIES;
+
+  const seededProductIds = new Set<string>();
+  const seededCustomerIds = new Set<string>();
+
   // Step 2: Seed products and customers first so approval & order references satisfy exists() rules
   const productsBatch = writeBatch(db);
-  for (const prod of INITIAL_PRODUCTS) {
+  for (const prod of seedProducts) {
     const id = sanitizeDocId(prod.id);
+    seededProductIds.add(id);
     const ref = doc(db, "users", uid, "products", id);
     productsBatch.set(ref, {
       ...buildProductPayload(uid, prod),
@@ -249,8 +368,9 @@ export async function ensureUserWorkspace(
       updatedAt: serverTimestamp(),
     });
   }
-  for (const cust of INITIAL_CUSTOMERS) {
+  for (const cust of seedCustomers) {
     const id = sanitizeDocId(cust.id);
+    seededCustomerIds.add(id);
     const ref = doc(db, "users", uid, "customers", id);
     productsBatch.set(
       ref,
@@ -284,9 +404,9 @@ export async function ensureUserWorkspace(
     handleFirestoreError(error, OperationType.CREATE, `users/${uid}/products`);
   }
 
-  // Step 3: Seed orders, approvals, and notifications
+  // Step 3: Seed orders, approvals, notifications, and accounting entries
   const restBatch = writeBatch(db);
-  for (const order of INITIAL_ORDERS) {
+  for (const order of seedOrders) {
     const id = sanitizeDocId(order.id);
     const ref = doc(db, "users", uid, "orders", id);
     const orderDoc: Record<string, unknown> = {
@@ -299,6 +419,12 @@ export async function ensureUserWorkspace(
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
+    if (order.customerId) {
+      const cleanCustId = sanitizeDocId(order.customerId);
+      if (seededCustomerIds.has(cleanCustId)) {
+        orderDoc.customerId = cleanCustId;
+      }
+    }
     if (order.channel) {
       orderDoc.channel = clampString(order.channel, LIMITS.CHANNEL_MAX);
     }
@@ -322,26 +448,34 @@ export async function ensureUserWorkspace(
     restBatch.set(ref, orderDoc);
   }
 
-  for (const req of INITIAL_APPROVALS) {
+  for (const req of seedApprovals) {
+    const cleanProdId = sanitizeDocId(req.productId);
+    if (!seededProductIds.has(cleanProdId)) continue;
     const id = sanitizeDocId(req.id);
     const ref = doc(db, "users", uid, "approvals", id);
-    restBatch.set(ref, {
-      ownerUid: uid,
-      productId: sanitizeDocId(req.productId),
-      productName: clampString(req.productName, LIMITS.PRODUCT_NAME_MAX),
-      sku: clampString(req.sku, LIMITS.SKU_MAX),
-      requestedBy: clampString(req.requestedBy, LIMITS.OWNER_NAME_MAX),
-      currentStock: clampNumber(req.currentStock, 0, 1000000),
-      requestedStock: clampNumber(req.requestedStock, 0, 1000000),
-      reason: clampString(req.reason, LIMITS.REASON_MAX),
-      createdAtLabel: clampString(req.createdAt, LIMITS.LABEL_MAX),
-      status: req.status,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    restBatch.set(
+      ref,
+      stripUndefined({
+        ownerUid: uid,
+        productId: cleanProdId,
+        productName: clampString(req.productName, LIMITS.PRODUCT_NAME_MAX),
+        sku: clampString(req.sku, LIMITS.SKU_MAX),
+        requestedBy: clampString(req.requestedBy, LIMITS.OWNER_NAME_MAX),
+        currentStock: clampNumber(req.currentStock, 0, 1000000),
+        requestedStock: clampNumber(req.requestedStock, 0, 1000000),
+        reason: clampString(req.reason, LIMITS.REASON_MAX),
+        createdAtLabel: clampString(req.createdAt, LIMITS.LABEL_MAX),
+        status: req.status === "pending" ? "pending" : "pending",
+        notifiedLineId: req.notifiedLineId
+          ? req.notifiedLineId.trim().slice(0, LIMITS.OWNER_LINE_ID_MAX)
+          : undefined,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
   }
 
-  for (const noti of INITIAL_NOTIFICATIONS) {
+  for (const noti of seedNotifications) {
     const id = sanitizeDocId(noti.id);
     const ref = doc(db, "users", uid, "notifications", id);
     restBatch.set(ref, {
@@ -351,6 +485,16 @@ export async function ensureUserWorkspace(
       timeLabel: clampString(noti.time, LIMITS.LABEL_MAX),
       type: noti.type,
       read: Boolean(noti.read),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  for (const entry of seedAccounting) {
+    const id = sanitizeDocId(entry.id);
+    const ref = doc(db, "users", uid, "accounting", id);
+    restBatch.set(ref, {
+      ...buildAccountingPayload(uid, entry),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -524,6 +668,10 @@ export function subscribeApprovals(
           reason: String(data.reason || ""),
           createdAt: String(data.createdAtLabel || ""),
           status: data.status || "pending",
+          notifiedLineId:
+            typeof data.notifiedLineId === "string"
+              ? data.notifiedLineId
+              : undefined,
         };
       });
       onData(list);
@@ -644,12 +792,81 @@ export function subscribeCustomers(
   );
 }
 
+export function subscribeAccounting(
+  uid: string,
+  onData: (entries: AccountingEntry[]) => void,
+  onError: (err: unknown) => void
+) {
+  const path = `users/${uid}/accounting`;
+  const q = query(
+    collection(db, "users", uid, "accounting"),
+    where("ownerUid", "==", uid)
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: AccountingEntry[] = snapshot.docs
+        .map((d) => {
+          const data = d.data();
+          const createdMillis =
+            data.createdAt && typeof data.createdAt.toMillis === "function"
+              ? data.createdAt.toMillis()
+              : 0;
+          return {
+            _sort: createdMillis,
+            entry: {
+              id: d.id,
+              date: String(data.date || normalizeIsoDate("")),
+              type: (data.type === "expense"
+                ? "expense"
+                : "income") as AccountingEntryType,
+              category: String(data.category || "รายรับอื่นๆ"),
+              title: String(data.title || ""),
+              amountThb: Number(data.amountThb || 0),
+              paymentMethod: (ALLOWED_PAYMENT_METHODS.includes(
+                data.paymentMethod as AccountingPaymentMethod
+              )
+                ? data.paymentMethod
+                : "โอนธนาคาร") as AccountingPaymentMethod,
+              referenceCode:
+                typeof data.referenceCode === "string"
+                  ? data.referenceCode
+                  : undefined,
+              note: typeof data.note === "string" ? data.note : undefined,
+              sourceOrderId:
+                typeof data.sourceOrderId === "string"
+                  ? data.sourceOrderId
+                  : undefined,
+              receiptImageUrl:
+                typeof data.receiptImageUrl === "string" &&
+                data.receiptImageUrl.trim().length > 0
+                  ? data.receiptImageUrl
+                  : undefined,
+            } as AccountingEntry,
+          };
+        })
+        .sort((a, b) => b._sort - a._sort)
+        .map((item) => item.entry);
+      onData(list);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onError(wrapped);
+      }
+    }
+  );
+}
+
 // --- Write Operations ---
 
 export async function updateWorkspaceSettings(
   uid: string,
   updates: Partial<{
     ownerName: string;
+    ownerPin: string;
+    ownerLineId: string;
     roleMode: RoleMode;
     categories: string[];
     exchangeRate: number;
@@ -662,6 +879,16 @@ export async function updateWorkspaceSettings(
   const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
   if (updates.ownerName !== undefined) {
     clean.ownerName = clampString(updates.ownerName, LIMITS.OWNER_NAME_MAX, "คุณธนวัฒน์");
+  }
+  if (updates.ownerPin !== undefined && /^\d{4}$/.test(updates.ownerPin)) {
+    clean.ownerPin = updates.ownerPin;
+  }
+  if (updates.ownerLineId !== undefined) {
+    clean.ownerLineId = clampString(
+      updates.ownerLineId,
+      LIMITS.OWNER_LINE_ID_MAX,
+      "Hnan145"
+    );
   }
   if (updates.roleMode !== undefined) {
     clean.roleMode = updates.roleMode === "staff" ? "staff" : "owner";
@@ -714,6 +941,7 @@ export async function updateProductDoc(
   productId: string,
   updates: Partial<{
     name: string;
+    sku: string;
     category: string;
     stock: number;
     lowThreshold: number;
@@ -730,6 +958,7 @@ export async function updateProductDoc(
   const path = `users/${uid}/products/${id}`;
   const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
   if (updates.name !== undefined) clean.name = clampString(updates.name, LIMITS.PRODUCT_NAME_MAX);
+  if (updates.sku !== undefined) clean.sku = clampString(updates.sku, LIMITS.SKU_MAX);
   if (updates.category !== undefined) clean.category = clampString(updates.category, LIMITS.CATEGORY_MAX);
   if (updates.stock !== undefined) clean.stock = clampNumber(updates.stock, 0, 1000000);
   if (updates.lowThreshold !== undefined) clean.lowThreshold = clampNumber(updates.lowThreshold, 0, 100000);
@@ -752,6 +981,16 @@ export async function updateProductDoc(
     await updateDoc(doc(db, "users", uid, "products", id), clean);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteProductDoc(uid: string, productId: string) {
+  const id = sanitizeDocId(productId);
+  const path = `users/${uid}/products/${id}`;
+  try {
+    await deleteDoc(doc(db, "users", uid, "products", id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
@@ -920,24 +1159,40 @@ export async function confirmOrderDeliveryDoc(
   }
 }
 
+export async function deleteOrderDoc(uid: string, orderId: string) {
+  const id = sanitizeDocId(orderId);
+  const path = `users/${uid}/orders/${id}`;
+  try {
+    await deleteDoc(doc(db, "users", uid, "orders", id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
 export async function createApprovalDoc(uid: string, req: StockApprovalRequest) {
   const id = sanitizeDocId(req.id);
   const path = `users/${uid}/approvals/${id}`;
   try {
-    await setDoc(doc(db, "users", uid, "approvals", id), {
-      ownerUid: uid,
-      productId: sanitizeDocId(req.productId),
-      productName: clampString(req.productName, LIMITS.PRODUCT_NAME_MAX),
-      sku: clampString(req.sku, LIMITS.SKU_MAX),
-      requestedBy: clampString(req.requestedBy, LIMITS.OWNER_NAME_MAX),
-      currentStock: clampNumber(req.currentStock, 0, 1000000),
-      requestedStock: clampNumber(req.requestedStock, 0, 1000000),
-      reason: clampString(req.reason, LIMITS.REASON_MAX),
-      createdAtLabel: clampString(req.createdAt, LIMITS.LABEL_MAX),
-      status: "pending",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    await setDoc(
+      doc(db, "users", uid, "approvals", id),
+      stripUndefined({
+        ownerUid: uid,
+        productId: sanitizeDocId(req.productId),
+        productName: clampString(req.productName, LIMITS.PRODUCT_NAME_MAX),
+        sku: clampString(req.sku, LIMITS.SKU_MAX),
+        requestedBy: clampString(req.requestedBy, LIMITS.OWNER_NAME_MAX),
+        currentStock: clampNumber(req.currentStock, 0, 1000000),
+        requestedStock: clampNumber(req.requestedStock, 0, 1000000),
+        reason: clampString(req.reason, LIMITS.REASON_MAX),
+        createdAtLabel: clampString(req.createdAt, LIMITS.LABEL_MAX),
+        status: "pending",
+        notifiedLineId: req.notifiedLineId
+          ? req.notifiedLineId.trim().slice(0, LIMITS.OWNER_LINE_ID_MAX)
+          : undefined,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
@@ -957,6 +1212,16 @@ export async function resolveApprovalDoc(
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteApprovalDoc(uid: string, approvalId: string) {
+  const id = sanitizeDocId(approvalId);
+  const path = `users/${uid}/approvals/${id}`;
+  try {
+    await deleteDoc(doc(db, "users", uid, "approvals", id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
@@ -989,6 +1254,16 @@ export async function markNotificationReadDoc(uid: string, notiId: string) {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteNotificationDoc(uid: string, notiId: string) {
+  const id = sanitizeDocId(notiId);
+  const path = `users/${uid}/notifications/${id}`;
+  try {
+    await deleteDoc(doc(db, "users", uid, "notifications", id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
@@ -1088,4 +1363,566 @@ export async function deleteCustomerDoc(uid: string, customerId: string) {
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
+}
+
+export async function createAccountingDoc(
+  uid: string,
+  entryId: string,
+  entry: Omit<AccountingEntry, "id">
+) {
+  const id = sanitizeDocId(entryId);
+  const path = `users/${uid}/accounting/${id}`;
+  try {
+    await setDoc(doc(db, "users", uid, "accounting", id), {
+      ...buildAccountingPayload(uid, entry),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function updateAccountingDoc(
+  uid: string,
+  entryId: string,
+  updates: Omit<AccountingEntry, "id">
+) {
+  const id = sanitizeDocId(entryId);
+  const path = `users/${uid}/accounting/${id}`;
+  const fullPayload = buildAccountingPayload(uid, updates);
+  delete fullPayload.ownerUid;
+  try {
+    await updateDoc(doc(db, "users", uid, "accounting", id), {
+      ...fullPayload,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteAccountingDoc(uid: string, entryId: string) {
+  const id = sanitizeDocId(entryId);
+  const path = `users/${uid}/accounting/${id}`;
+  try {
+    await deleteDoc(doc(db, "users", uid, "accounting", id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function deleteDocsBatch(
+  uid: string,
+  subcollection: "accounting" | "approvals" | "notifications",
+  ids: string[]
+) {
+  if (ids.length === 0) return;
+  const path = `users/${uid}/${subcollection}`;
+  const batch = writeBatch(db);
+  ids.slice(0, 400).forEach((rawId) => {
+    const id = sanitizeDocId(rawId);
+    batch.delete(doc(db, "users", uid, subcollection, id));
+  });
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// --- Multi-Device Presence (Firestore) ---
+
+export function subscribeDevices(
+  uid: string,
+  onData: (devices: ConnectedDevice[]) => void,
+  onError: (err: unknown) => void
+) {
+  const path = `users/${uid}/devices`;
+  const q = query(
+    collection(db, "users", uid, "devices"),
+    where("ownerUid", "==", uid)
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const now = Date.now();
+      const STALE_MS = 5 * 60 * 1000;
+      const list: ConnectedDevice[] = snapshot.docs
+        .map((d) => {
+          const data = d.data();
+          const lastActiveMs =
+            data.lastActiveAt && typeof data.lastActiveAt.toMillis === "function"
+              ? data.lastActiveAt.toMillis()
+              : now;
+          const deviceType: DeviceFormFactor =
+            data.deviceType === "mobile" ||
+            data.deviceType === "tablet" ||
+            data.deviceType === "desktop"
+              ? data.deviceType
+              : "desktop";
+          return {
+            deviceId: d.id,
+            deviceName: String(data.deviceName || "อุปกรณ์ออนไลน์"),
+            deviceType,
+            roleMode: (data.roleMode === "owner" ? "owner" : "staff") as RoleMode,
+            roomId: typeof data.roomId === "string" ? data.roomId : "denewstock-main",
+            lastActiveAt: lastActiveMs,
+            source: "cloud" as const,
+          };
+        })
+        .filter((d) => now - d.lastActiveAt <= STALE_MS)
+        .sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+      onData(list);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onError(wrapped);
+      }
+    }
+  );
+}
+
+const deviceUpsertQueues = new Map<string, Promise<void>>();
+
+export async function upsertDeviceSessionDoc(
+  uid: string,
+  deviceId: string,
+  session: {
+    deviceName: string;
+    deviceType: DeviceFormFactor;
+    roleMode: RoleMode;
+    roomId: string;
+  }
+) {
+  const id = sanitizeDocId(deviceId);
+  const queueKey = `${uid}:${id}`;
+  const previous = deviceUpsertQueues.get(queueKey) ?? Promise.resolve();
+
+  const run = previous.catch(() => undefined).then(async () => {
+    const path = `users/${uid}/devices/${id}`;
+    const ref = doc(db, "users", uid, "devices", id);
+    const cleanName = clampString(session.deviceName, 80, "อุปกรณ์ออนไลน์");
+    const cleanType: DeviceFormFactor =
+      session.deviceType === "mobile" ||
+      session.deviceType === "tablet" ||
+      session.deviceType === "desktop"
+        ? session.deviceType
+        : "desktop";
+    const cleanRole: RoleMode = session.roleMode === "owner" ? "owner" : "staff";
+    const cleanRoom =
+      sanitizeDocId(session.roomId).slice(0, 64) || "denewstock-main";
+
+    const updateFields = {
+      deviceName: cleanName,
+      deviceType: cleanType,
+      roleMode: cleanRole,
+      roomId: cleanRoom,
+      lastActiveAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      const existingSnap = await getDoc(ref);
+      if (existingSnap.exists()) {
+        await updateDoc(ref, updateFields);
+      } else {
+        try {
+          await setDoc(ref, {
+            ownerUid: uid,
+            ...updateFields,
+            createdAt: serverTimestamp(),
+          });
+        } catch (createErr) {
+          // If another tab/session created this device doc concurrently, retry as updateDoc
+          const code = (createErr as { code?: string })?.code;
+          if (code === "permission-denied") {
+            await updateDoc(ref, updateFields);
+          } else {
+            throw createErr;
+          }
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  });
+
+  deviceUpsertQueues.set(queueKey, run);
+  try {
+    await run;
+  } finally {
+    if (deviceUpsertQueues.get(queueKey) === run) {
+      deviceUpsertQueues.delete(queueKey);
+    }
+  }
+}
+
+export async function deleteDeviceSessionDoc(uid: string, deviceId: string) {
+  const id = sanitizeDocId(deviceId);
+  const path = `users/${uid}/devices/${id}`;
+  try {
+    await deleteDoc(doc(db, "users", uid, "devices", id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export interface FullCloudSyncSummary {
+  products: number;
+  customers: number;
+  orders: number;
+  approvals: number;
+  notifications: number;
+  accounting: number;
+  totalSynced: number;
+}
+
+/**
+ * Safely saves and synchronizes ALL local/live-room store data into Google Cloud Firestore
+ * without violating immutable `createdAt`, foreign-key `exists()`, or terminal lock rules.
+ */
+export async function syncFullWorkspaceToCloud(
+  uid: string,
+  snapshot: LocalSeedSnapshot
+): Promise<FullCloudSyncSummary> {
+  // 1. Ensure parent workspace document exists and sync settings + categories
+  await ensureUserWorkspace(
+    uid,
+    snapshot.ownerName || "คุณธนวัฒน์",
+    snapshot
+  );
+
+  const settingsPatch: Parameters<typeof updateWorkspaceSettings>[1] = {};
+  if (snapshot.ownerName && snapshot.ownerName.trim()) {
+    settingsPatch.ownerName = snapshot.ownerName.trim();
+  }
+  if (snapshot.ownerPin && /^\d{4}$/.test(snapshot.ownerPin)) {
+    settingsPatch.ownerPin = snapshot.ownerPin;
+  }
+  if (snapshot.ownerLineId && snapshot.ownerLineId.trim()) {
+    settingsPatch.ownerLineId = snapshot.ownerLineId.trim();
+  }
+  if (Array.isArray(snapshot.categories) && snapshot.categories.length > 0) {
+    settingsPatch.categories = snapshot.categories;
+  }
+  if (Object.keys(settingsPatch).length > 0) {
+    await updateWorkspaceSettings(uid, settingsPatch);
+  }
+
+  // Helper to commit batched operations cleanly in chunks of <= 350 writes
+  type BatchOp = (batch: ReturnType<typeof writeBatch>) => void;
+  const commitOps = async (ops: BatchOp[], pathLabel: string) => {
+    const CHUNK = 350;
+    for (let i = 0; i < ops.length; i += CHUNK) {
+      const batch = writeBatch(db);
+      ops.slice(i, i + CHUNK).forEach((fn) => fn(batch));
+      try {
+        await batch.commit();
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, pathLabel);
+      }
+    }
+  };
+
+  // 2. Read existing IDs across all subcollections so we use updateDoc for existing docs and setDoc for missing docs
+  const [
+    existingProductsSnap,
+    existingCustomersSnap,
+    existingOrdersSnap,
+    existingApprovalsSnap,
+    existingNotisSnap,
+    existingAccountingSnap,
+  ] = await Promise.all([
+    getDocs(query(collection(db, "users", uid, "products"), where("ownerUid", "==", uid))),
+    getDocs(query(collection(db, "users", uid, "customers"), where("ownerUid", "==", uid))),
+    getDocs(query(collection(db, "users", uid, "orders"), where("ownerUid", "==", uid))),
+    getDocs(query(collection(db, "users", uid, "approvals"), where("ownerUid", "==", uid))),
+    getDocs(query(collection(db, "users", uid, "notifications"), where("ownerUid", "==", uid))),
+    getDocs(query(collection(db, "users", uid, "accounting"), where("ownerUid", "==", uid))),
+  ]);
+
+  const existingProductIds = new Set(existingProductsSnap.docs.map((d) => d.id));
+  const existingCustomerIds = new Set(existingCustomersSnap.docs.map((d) => d.id));
+  const existingOrderIds = new Set(existingOrdersSnap.docs.map((d) => d.id));
+  const existingApprovalStatus = new Map(
+    existingApprovalsSnap.docs.map((d) => [d.id, String(d.data().status || "pending")])
+  );
+  const existingNotiRead = new Map(
+    existingNotisSnap.docs.map((d) => [d.id, Boolean(d.data().read)])
+  );
+  const existingAccountingIds = new Set(existingAccountingSnap.docs.map((d) => d.id));
+
+  const summary: FullCloudSyncSummary = {
+    products: 0,
+    customers: 0,
+    orders: 0,
+    approvals: 0,
+    notifications: 0,
+    accounting: 0,
+    totalSynced: 0,
+  };
+
+  // 3. Stage 1: Upsert Products and Customers FIRST (required by exists() rules on orders & approvals)
+  const stage1Ops: BatchOp[] = [];
+  const allCloudProductIds = new Set(existingProductIds);
+  const allCloudCustomerIds = new Set(existingCustomerIds);
+
+  for (const prod of snapshot.products ?? []) {
+    const id = sanitizeDocId(prod.id);
+    allCloudProductIds.add(id);
+    const ref = doc(db, "users", uid, "products", id);
+    const fullPayload = buildProductPayload(uid, prod);
+    if (existingProductIds.has(id)) {
+      const updatePayload: Record<string, unknown> = { ...fullPayload };
+      delete updatePayload.ownerUid;
+      delete updatePayload.origin; // origin is immutable in product update allowlist
+      updatePayload.updatedAt = serverTimestamp();
+      stage1Ops.push((batch) => batch.update(ref, updatePayload));
+    } else {
+      stage1Ops.push((batch) =>
+        batch.set(ref, {
+          ...fullPayload,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+    }
+    summary.products += 1;
+  }
+
+  for (const cust of snapshot.customers ?? []) {
+    const id = sanitizeDocId(cust.id);
+    allCloudCustomerIds.add(id);
+    const ref = doc(db, "users", uid, "customers", id);
+    const baseFields = stripUndefined({
+      name: clampString(cust.name, LIMITS.CUSTOMER_NAME_MAX, "ลูกค้า"),
+      phone:
+        typeof cust.phone === "string" && cust.phone.trim()
+          ? cust.phone.trim().slice(0, LIMITS.CUSTOMER_PHONE_MAX)
+          : undefined,
+      lineId:
+        typeof cust.lineId === "string" && cust.lineId.trim()
+          ? cust.lineId.trim().slice(0, LIMITS.CUSTOMER_LINE_MAX)
+          : undefined,
+      email:
+        typeof cust.email === "string" && cust.email.trim()
+          ? cust.email.trim().slice(0, LIMITS.CUSTOMER_EMAIL_MAX)
+          : undefined,
+      address:
+        typeof cust.address === "string" && cust.address.trim()
+          ? cust.address.trim().slice(0, LIMITS.CUSTOMER_ADDRESS_MAX)
+          : undefined,
+      note:
+        typeof cust.note === "string" && cust.note.trim()
+          ? cust.note.trim().slice(0, LIMITS.CUSTOMER_NOTE_MAX)
+          : undefined,
+    });
+
+    if (existingCustomerIds.has(id)) {
+      stage1Ops.push((batch) =>
+        batch.update(ref, {
+          ...baseFields,
+          updatedAt: serverTimestamp(),
+        })
+      );
+    } else {
+      stage1Ops.push((batch) =>
+        batch.set(ref, {
+          ownerUid: uid,
+          ...baseFields,
+          createdAtLabel: clampString(cust.createdAt || "วันนี้", LIMITS.LABEL_MAX, "วันนี้"),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+    }
+    summary.customers += 1;
+  }
+
+  if (stage1Ops.length > 0) {
+    await commitOps(stage1Ops, `users/${uid}/products`);
+  }
+
+  // 4. Stage 2: Sync Orders, Approvals, Notifications, and Accounting Entries
+  const stage2Ops: BatchOp[] = [];
+
+  for (const order of snapshot.orders ?? []) {
+    const id = sanitizeDocId(order.id);
+    if (existingOrderIds.has(id)) {
+      // Existing orders are kept intact to respect strict order state-machine & terminal delivery locks
+      summary.orders += 1;
+      continue;
+    }
+    if (!Array.isArray(order.items) || order.items.length === 0) continue;
+
+    const ref = doc(db, "users", uid, "orders", id);
+    const orderDoc: Record<string, unknown> = {
+      ownerUid: uid,
+      customerName: clampString(order.customerName, LIMITS.CUSTOMER_NAME_MAX),
+      status: order.status,
+      totalThb: clampNumber(order.totalThb, 0, 10000000),
+      createdAtLabel: clampString(order.createdAt || "วันนี้", LIMITS.LABEL_MAX),
+      items: sanitizeOrderItems(order.items),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    if (order.customerId) {
+      const cleanCustId = sanitizeDocId(order.customerId);
+      if (allCloudCustomerIds.has(cleanCustId)) {
+        orderDoc.customerId = cleanCustId;
+      }
+    }
+    if (order.channel) orderDoc.channel = clampString(order.channel, LIMITS.CHANNEL_MAX);
+    if (order.orderType === "walk_in" || order.orderType === "delivery") {
+      orderDoc.orderType = order.orderType;
+    }
+    if (
+      order.shippingOption === "store_delivery" ||
+      order.shippingOption === "carrier" ||
+      order.shippingOption === "store_pickup"
+    ) {
+      orderDoc.shippingOption = order.shippingOption;
+    }
+    if (order.carrierName) {
+      orderDoc.carrierName = clampString(order.carrierName, LIMITS.CARRIER_NAME_MAX);
+    }
+    if (order.courier && STANDARD_COURIERS.includes(order.courier)) {
+      orderDoc.courier = order.courier;
+    }
+    if (order.trackingCode) {
+      orderDoc.trackingCode = clampString(order.trackingCode, LIMITS.TRACKING_CODE_MAX);
+    }
+    if (order.deliveryMethod === "photo_proof" || order.deliveryMethod === "cash") {
+      orderDoc.deliveryMethod = order.deliveryMethod;
+    }
+    if (
+      typeof order.deliveryProofImage === "string" &&
+      order.deliveryProofImage.length > 0 &&
+      order.deliveryProofImage.length <= LIMITS.IMAGE_URL_MAX
+    ) {
+      orderDoc.deliveryProofImage = order.deliveryProofImage;
+    }
+    if (typeof order.cashReceivedThb === "number") {
+      orderDoc.cashReceivedThb = clampNumber(order.cashReceivedThb, 0, 10000000);
+    }
+    if (typeof order.deliveryNote === "string" && order.deliveryNote.trim()) {
+      orderDoc.deliveryNote = order.deliveryNote.trim().slice(0, LIMITS.DELIVERY_NOTE_MAX);
+    }
+    if (typeof order.deliveryConfirmedAt === "string" && order.deliveryConfirmedAt.trim()) {
+      orderDoc.deliveryConfirmedAt = clampString(order.deliveryConfirmedAt, LIMITS.LABEL_MAX);
+    }
+    stage2Ops.push((batch) => batch.set(ref, orderDoc));
+    summary.orders += 1;
+  }
+
+  for (const req of snapshot.approvals ?? []) {
+    const id = sanitizeDocId(req.id);
+    const cleanProdId = sanitizeDocId(req.productId);
+    const ref = doc(db, "users", uid, "approvals", id);
+    const prevStatus = existingApprovalStatus.get(id);
+    if (prevStatus) {
+      if (prevStatus === "pending" && (req.status === "approved" || req.status === "rejected")) {
+        stage2Ops.push((batch) =>
+          batch.update(ref, {
+            status: req.status,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      }
+      summary.approvals += 1;
+    } else if (req.status === "pending" && allCloudProductIds.has(cleanProdId)) {
+      stage2Ops.push((batch) =>
+        batch.set(
+          ref,
+          stripUndefined({
+            ownerUid: uid,
+            productId: cleanProdId,
+            productName: clampString(req.productName, LIMITS.PRODUCT_NAME_MAX),
+            sku: clampString(req.sku, LIMITS.SKU_MAX),
+            requestedBy: clampString(req.requestedBy, LIMITS.OWNER_NAME_MAX),
+            currentStock: clampNumber(req.currentStock, 0, 1000000),
+            requestedStock: clampNumber(req.requestedStock, 0, 1000000),
+            reason: clampString(req.reason, LIMITS.REASON_MAX),
+            createdAtLabel: clampString(req.createdAt || "เมื่อสักครู่", LIMITS.LABEL_MAX),
+            status: "pending",
+            notifiedLineId: req.notifiedLineId
+              ? req.notifiedLineId.trim().slice(0, LIMITS.OWNER_LINE_ID_MAX)
+              : undefined,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+      summary.approvals += 1;
+    }
+  }
+
+  for (const noti of snapshot.notifications ?? []) {
+    const id = sanitizeDocId(noti.id);
+    const ref = doc(db, "users", uid, "notifications", id);
+    if (existingNotiRead.has(id)) {
+      if (!existingNotiRead.get(id) && noti.read) {
+        stage2Ops.push((batch) =>
+          batch.update(ref, {
+            read: true,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      }
+      summary.notifications += 1;
+    } else {
+      stage2Ops.push((batch) =>
+        batch.set(ref, {
+          ownerUid: uid,
+          title: clampString(noti.title, LIMITS.NOTI_TITLE_MAX),
+          detail: clampString(noti.detail, LIMITS.NOTI_DETAIL_MAX),
+          timeLabel: clampString(noti.time || "เมื่อสักครู่", LIMITS.LABEL_MAX),
+          type: noti.type,
+          read: Boolean(noti.read),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+      summary.notifications += 1;
+    }
+  }
+
+  for (const entry of snapshot.accountingEntries ?? []) {
+    if (!Number.isFinite(entry.amountThb) || entry.amountThb <= 0) continue;
+    const id = sanitizeDocId(entry.id);
+    const ref = doc(db, "users", uid, "accounting", id);
+    const payload = buildAccountingPayload(uid, entry);
+    if (existingAccountingIds.has(id)) {
+      const updatePayload: Record<string, unknown> = { ...payload };
+      delete updatePayload.ownerUid;
+      updatePayload.updatedAt = serverTimestamp();
+      stage2Ops.push((batch) => batch.update(ref, updatePayload));
+    } else {
+      stage2Ops.push((batch) =>
+        batch.set(ref, {
+          ...payload,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+    }
+    summary.accounting += 1;
+  }
+
+  if (stage2Ops.length > 0) {
+    await commitOps(stage2Ops, `users/${uid}/accounting`);
+  }
+
+  summary.totalSynced =
+    summary.products +
+    summary.customers +
+    summary.orders +
+    summary.approvals +
+    summary.notifications +
+    summary.accounting;
+
+  return summary;
 }
