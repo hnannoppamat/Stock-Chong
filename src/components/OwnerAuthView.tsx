@@ -45,9 +45,7 @@ export function OwnerAuthView({
 
   const [pinInput, setPinInput] = useState("");
   const [pinStatus, setPinStatus] = useState(
-    ownerPin === "123456"
-      ? "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน (รหัสเริ่มต้น: 123456)"
-      : "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน"
+    "กรอกรหัสผ่าน 4 หลักเพื่อเข้าโหมดเจ้าของร้าน"
   );
   const [pinStatusType, setPinStatusType] = useState<
     "neutral" | "success" | "error" | "info"
@@ -62,11 +60,7 @@ export function OwnerAuthView({
 
   useEffect(() => {
     if (role === "staff") {
-      setPinStatus(
-        ownerPin === "123456"
-          ? "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน (รหัสเริ่มต้น: 123456)"
-          : "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน"
-      );
+      setPinStatus("กรอกรหัสผ่าน 4 หลักเพื่อเข้าโหมดเจ้าของร้าน");
       setPinStatusType("neutral");
     }
   }, [role, ownerPin]);
@@ -98,11 +92,7 @@ export function OwnerAuthView({
           );
         }, 650);
       } else {
-        setPinStatus(
-          ownerPin === "123456"
-            ? "รหัสผ่านไม่ถูกต้อง (รหัสเริ่มต้นคือ 123456)"
-            : "รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง"
-        );
+        setPinStatus("รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง");
         setPinStatusType("error");
         onNotify("รหัสผ่านไม่ถูกต้อง", "error");
         setTimeout(() => {
@@ -113,11 +103,11 @@ export function OwnerAuthView({
   };
 
   const handleDigitPress = (digit: string) => {
-    if (pinInput.length >= 6) return;
+    if (pinInput.length >= 4) return;
     const nextPin = pinInput + digit;
     setPinInput(nextPin);
 
-    if (nextPin.length === 6) {
+    if (nextPin.length === 4) {
       submitPinCandidate(nextPin);
     }
   };
@@ -130,11 +120,7 @@ export function OwnerAuthView({
 
   const handleClearPin = () => {
     setPinInput("");
-    setPinStatus(
-      ownerPin === "123456"
-        ? "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน (รหัสเริ่มต้น: 123456)"
-        : "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน"
-    );
+    setPinStatus("กรอกรหัสผ่าน 4 หลักเพื่อเข้าโหมดเจ้าของร้าน");
     setPinStatusType("neutral");
   };
 
@@ -154,9 +140,9 @@ export function OwnerAuthView({
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
         setPinInput((prev) => {
-          if (prev.length >= 6) return prev;
+          if (prev.length >= 4) return prev;
           const next = prev + e.key;
-          if (next.length === 6) {
+          if (next.length === 4) {
             submitPinCandidate(next);
           }
           return next;
@@ -174,15 +160,9 @@ export function OwnerAuthView({
   }, [role, selectedTab, ownerPin]);
 
   const handleForgotPin = () => {
-    if (ownerPin === "123456") {
-      setPinStatus("รหัสผ่านเริ่มต้นสำหรับเจ้าของร้านคือ 123456");
-      setPinStatusType("info");
-      onNotify("รหัสผ่านเริ่มต้น: 123456", "key");
-    } else {
-      setPinStatus("กรุณาติดต่อเจ้าของร้านเพื่อขอรหัสผ่าน 6 หลัก");
-      setPinStatusType("info");
-      onNotify("กรุณาติดต่อเจ้าของร้านเพื่อขอรหัสผ่าน", "key");
-    }
+    setPinStatus("กรุณาติดต่อเจ้าของร้านเพื่อขอรหัสผ่าน 4 หลัก");
+    setPinStatusType("info");
+    onNotify("กรุณาติดต่อเจ้าของร้านเพื่อขอรหัสผ่าน", "key");
   };
 
   const handleSaveNewPin = (e: React.FormEvent) => {
@@ -192,8 +172,8 @@ export function OwnerAuthView({
       setChangePinError("รหัสผ่านปัจจุบันไม่ถูกต้อง");
       return;
     }
-    if (!/^\d{6}$/.test(newPinDraft)) {
-      setChangePinError("กรุณากรอกรหัสผ่านใหม่เป็นตัวเลข 6 หลัก");
+    if (!/^\d{4}$/.test(newPinDraft)) {
+      setChangePinError("กรุณากรอกรหัสผ่านใหม่เป็นตัวเลข 4 หลัก");
       return;
     }
     if (newPinDraft !== confirmPinDraft) {
@@ -458,7 +438,7 @@ export function OwnerAuthView({
                         pin
                       </span>
                       <span className="text-[13px] font-semibold text-on-surface">
-                        รหัสผ่านเข้าโหมดเจ้าของร้าน (6 หลัก)
+                        รหัสผ่านเข้าโหมดเจ้าของร้าน (4 หลัก)
                       </span>
                     </div>
                     <button
@@ -481,33 +461,33 @@ export function OwnerAuthView({
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <label className="flex flex-col gap-1">
                           <span className="text-[11px] text-on-surface-variant">
-                            รหัสเดิม (6 หลัก)
+                            รหัสเดิม (4 หลัก)
                           </span>
                           <input
                             type="password"
                             inputMode="numeric"
-                            maxLength={6}
+                            maxLength={4}
                             value={currentPinDraft}
                             onChange={(e) =>
                               setCurrentPinDraft(e.target.value.replace(/\D/g, ""))
                             }
-                            placeholder="••••••"
+                            placeholder="••••"
                             className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-semibold tracking-widest text-on-surface focus:outline-none focus:border-primary"
                           />
                         </label>
                         <label className="flex flex-col gap-1">
                           <span className="text-[11px] text-on-surface-variant">
-                            รหัสใหม่ (6 หลัก)
+                            รหัสใหม่ (4 หลัก)
                           </span>
                           <input
                             type="password"
                             inputMode="numeric"
-                            maxLength={6}
+                            maxLength={4}
                             value={newPinDraft}
                             onChange={(e) =>
                               setNewPinDraft(e.target.value.replace(/\D/g, ""))
                             }
-                            placeholder="••••••"
+                            placeholder="••••"
                             className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-semibold tracking-widest text-on-surface focus:outline-none focus:border-primary"
                           />
                         </label>
@@ -518,12 +498,12 @@ export function OwnerAuthView({
                           <input
                             type="password"
                             inputMode="numeric"
-                            maxLength={6}
+                            maxLength={4}
                             value={confirmPinDraft}
                             onChange={(e) =>
                               setConfirmPinDraft(e.target.value.replace(/\D/g, ""))
                             }
-                            placeholder="••••••"
+                            placeholder="••••"
                             className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-semibold tracking-widest text-on-surface focus:outline-none focus:border-primary"
                           />
                         </label>
@@ -642,15 +622,15 @@ export function OwnerAuthView({
                   </p>
                 </div>
 
-                {/* 6-Digit PIN Dots */}
+                {/* 4-Digit PIN Dots */}
                 <div
-                  aria-label="รหัสผ่าน 6 หลัก"
-                  className="flex items-center justify-center gap-3.5 py-2"
+                  aria-label="รหัสผ่าน 4 หลัก"
+                  className="flex items-center justify-center gap-4 py-2"
                 >
-                  {[0, 1, 2, 3, 4, 5].map((idx) => (
+                  {[0, 1, 2, 3].map((idx) => (
                     <span
                       key={idx}
-                      className={`w-3.5 h-3.5 rounded-full transition-all duration-150 ${
+                      className={`w-4 h-4 rounded-full transition-all duration-150 ${
                         idx < pinInput.length
                           ? "bg-primary scale-110"
                           : "bg-surface-container-highest"
@@ -805,7 +785,7 @@ export function OwnerAuthView({
                   )}
                 </div>
                 <p className="text-[13px] text-on-surface-variant mt-0.5">
-                  ปลดล็อกด้วยรหัสผ่าน 6 หลัก: อัปโหลดและสแกนบิล, ดูต้นทุนจริง, ตั้งค่าเรทเงิน, อนุมัติ/แก้ไขจำนวนสต็อกได้เต็มรูปแบบ
+                  ปลดล็อกด้วยรหัสผ่าน 4 หลัก: อัปโหลดและสแกนบิล, ดูต้นทุนจริง, ตั้งค่าเรทเงิน, อนุมัติ/แก้ไขจำนวนสต็อกได้เต็มรูปแบบ
                 </p>
               </div>
             </div>

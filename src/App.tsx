@@ -43,7 +43,7 @@ import {
 } from "./types";
 
 const DEFAULT_OWNER_NAME = "คุณธนวัฒน์";
-const DEFAULT_OWNER_PIN = "123456";
+const DEFAULT_OWNER_PIN = "4145";
 const STORAGE_KEY = "denewstock_store_v1";
 
 interface PersistedStore {
@@ -94,7 +94,7 @@ function loadInitialStore(): PersistedStore {
       : (parsed.categories as string[]);
 
     const ownerPin =
-      typeof parsed.ownerPin === "string" && /^\d{6}$/.test(parsed.ownerPin)
+      typeof parsed.ownerPin === "string" && /^\d{4}$/.test(parsed.ownerPin)
         ? parsed.ownerPin
         : DEFAULT_OWNER_PIN;
 
@@ -145,7 +145,7 @@ export default function App() {
   const [initialStore] = useState<PersistedStore>(() => loadInitialStore());
 
   const [activeTab, setActiveTab] = useState<TabId>("inventory");
-  // Open directly in Staff mode without any login screen; Owner mode unlocks via 6-digit PIN
+  // Open directly in Staff mode without any login screen; Owner mode unlocks via 4-digit PIN
   const [role, setRole] = useState<RoleMode>("staff");
   const [ownerName, setOwnerName] = useState<string>(initialStore.ownerName);
   const [ownerPin, setOwnerPin] = useState<string>(initialStore.ownerPin);
