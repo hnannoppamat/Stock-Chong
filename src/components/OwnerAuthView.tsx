@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import { RoleMode, StockApprovalRequest } from "../types";
+import {
+  normalizePromptPayDigits,
+  parsePromptPayTarget,
+} from "../utils/promptpay";
 
 interface OwnerAuthViewProps {
   role: RoleMode;
@@ -9,6 +13,12 @@ interface OwnerAuthViewProps {
   onChangeOwnerPin: (newPin: string) => void;
   ownerLineId: string;
   onUpdateOwnerLineId: (lineId: string) => void;
+  promptPayId: string;
+  promptPayName: string;
+  onUpdatePromptPayConfig: (config: {
+    promptPayId: string;
+    promptPayName: string;
+  }) => void;
   onTestLineAutoNotify: () => void;
   pendingCount: number;
   packingCount: number;
@@ -43,6 +53,9 @@ export function OwnerAuthView({
   onChangeOwnerPin,
   ownerLineId,
   onUpdateOwnerLineId,
+  promptPayId,
+  promptPayName,
+  onUpdatePromptPayConfig,
   onTestLineAutoNotify,
   pendingCount,
   packingCount,
@@ -74,6 +87,10 @@ export function OwnerAuthView({
   const [nameDraft, setNameDraft] = useState(ownerName);
   const [isEditingLineId, setIsEditingLineId] = useState(false);
   const [lineIdDraft, setLineIdDraft] = useState(ownerLineId);
+  const [isEditingPromptPay, setIsEditingPromptPay] = useState(false);
+  const [promptPayIdDraft, setPromptPayIdDraft] = useState(promptPayId);
+  const [promptPayNameDraft, setPromptPayNameDraft] = useState(promptPayName);
+  const [promptPayError, setPromptPayError] = useState("");
 
   const [pinInput, setPinInput] = useState("");
   const [pinStatus, setPinStatus] = useState(
@@ -619,6 +636,113 @@ export function OwnerAuthView({
                     </form>
                   )}
                 </div>
+
+                {/* PromptPay Dynamic QR Account Setting */}
+                {(() => {
+                  const parsedPp = parsePromptPayTarget(promptPayId);
+                  return (
+                    <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="material-symbols-outlined text-[17px] text-[#113566] shrink-0">
+                            qr_code_2
+                          </span>
+                          <span className="text-[13px] font-semibold text-on-surface truncate">
+                            บัญชีรับเงินพร้อมเพย์ (QR):{" "}
+                            <span className="text-[#113566] font-bold font-mono">
+                              {parsedPp.valid
+                                ? parsedPp.formattedDisplay
+                                : "ยังไม่ได้ตั้งค่า"}
+                            </span>
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPromptPayIdDraft(promptPayId);
+                            setPromptPayNameDraft(
+                              promptPayName || `DenewStock (${ownerName})`
+                            );
+                            setPromptPayError("");
+                            setIsEditingPromptPay((prev) => !prev);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-[#113566]/12 text-[#113566] text-[11px] font-semibold hover:bg-[#113566] hover:text-white transition-colors cursor-pointer"
+                        >
+                          {isEditingPromptPay
+                            ? "ปิด"
+                            : parsedPp.valid
+                              ? "แก้ไขบัญชี QR"
+                              : "ตั้งค่าพร้อมเพย์"}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                        {parsedPp.valid
+                          ? `ชื่อบัญชี: ${promptPayName || `DenewStock (${ownerName})`} · ใช้สร้าง Dynamic QR ล็อกยอดชำระอัตโนมัติในหน้าออเดอร์ทุกเครื่อง`
+                          : "ระบุเบอร์มือถือ 10 หลัก หรือเลขผู้เสียภาษี 13 หลัก เพื่อสร้าง Dynamic QR ให้ลูกค้าสแกนจ่ายเงินได้ทันที"}
+                      </p>
+                      {isEditingPromptPay && (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const digits =
+                              normalizePromptPayDigits(promptPayIdDraft);
+                            const check = parsePromptPayTarget(digits);
+                            if (!check.valid) {
+                              setPromptPayError(
+                                "กรุณากรอกเบอร์มือถือ 10 หลัก (ขึ้นต้นด้วย 0), เลขบัตร/ภาษี 13 หลัก หรือ e-Wallet 15 หลัก"
+                              );
+                              return;
+                            }
+                            onUpdatePromptPayConfig({
+                              promptPayId: check.digits,
+                              promptPayName:
+                                promptPayNameDraft.trim().slice(0, 80) ||
+                                `DenewStock (${ownerName})`,
+                            });
+                            setPromptPayError("");
+                            setIsEditingPromptPay(false);
+                          }}
+                          className="flex flex-col gap-2 pt-1.5 border-t border-outline-variant/25"
+                        >
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={promptPayIdDraft}
+                              onChange={(e) => {
+                                setPromptPayIdDraft(e.target.value);
+                                setPromptPayError("");
+                              }}
+                              placeholder="เบอร์พร้อมเพย์ 10 หลัก หรือ 13 หลัก"
+                              className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-mono font-medium text-on-surface focus:outline-none focus:border-primary"
+                            />
+                            <input
+                              type="text"
+                              maxLength={80}
+                              value={promptPayNameDraft}
+                              onChange={(e) =>
+                                setPromptPayNameDraft(e.target.value)
+                              }
+                              placeholder={`DenewStock (${ownerName})`}
+                              className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-medium text-on-surface focus:outline-none focus:border-primary"
+                            />
+                          </div>
+                          {promptPayError && (
+                            <p className="text-[11px] font-medium text-error">
+                              {promptPayError}
+                            </p>
+                          )}
+                          <button
+                            type="submit"
+                            className="h-9 px-3 rounded-lg bg-[#113566] text-white text-[12px] font-semibold cursor-pointer hover:bg-[#0d2a52]"
+                          >
+                            บันทึกบัญชีพร้อมเพย์
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Pending Stock Approvals from Staff */}
                 <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2">

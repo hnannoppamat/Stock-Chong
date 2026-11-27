@@ -13,7 +13,8 @@
 6. **Approval Terminal Locking**: `StockApproval` transitions only from `pending` -> `approved` or `rejected`, and is locked thereafter for non-admins.
 7. **Accounting Integrity**: `AccountingEntry` strictly validates ISO `YYYY-MM-DD` dates, enum `type` (`income` | `expense`), positive bounded `amountThb`, allowlisted payment methods, bounded text fields, and optional `receiptImageUrl` (`<= 150000` chars).
 8. **Multi-Device Presence**: `DeviceSession` enforces strict enum `deviceType` (`mobile` | `tablet` | `desktop`), `roleMode` (`owner` | `staff`), bounded `deviceName` (<= 80), regex `roomId` (<= 64), and server-enforced `lastActiveAt == request.time`.
-9. **Admin Protection**: `/admins/{adminId}` denies all client writes; `isAdmin()` checks verified email (`hnan.noppamat@gmail.com`) or `/admins/$(request.auth.uid)`.
+9. **PromptPay Settings**: Optional `promptPayId` (`<= 20` chars) and `promptPayName` (`<= 80` chars) on `/users/{userId}` are strictly bounded strings modifiable only by the verified workspace owner or admin.
+10. **Admin Protection**: `/admins/{adminId}` denies all client writes; `isAdmin()` checks verified email (`hnan.noppamat@gmail.com`) or `/admins/$(request.auth.uid)`.
 
 ## 2. The "Dirty Dozen" Payloads (Expected: `PERMISSION_DENIED`)
 1. **Unverified Email Write**: Creating `/users/u1` with `email_verified: false`.

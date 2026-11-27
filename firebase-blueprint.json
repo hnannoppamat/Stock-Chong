@@ -31,6 +31,16 @@
           "maxLength": 64,
           "description": "Owner LINE ID for automated stock and order notifications."
         },
+        "promptPayId": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Optional Thai PromptPay ID (mobile phone, national/tax ID, or e-Wallet ID) for dynamic order payment QR codes."
+        },
+        "promptPayName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Optional PromptPay recipient display name shown on dynamic payment QR cards."
+        },
         "roleMode": {
           "type": "string",
           "enum": ["owner", "staff"],

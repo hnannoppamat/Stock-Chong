@@ -55,14 +55,16 @@ service cloud.firestore {
           'autoSave', 'seeded', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'uid', 'ownerName', 'ownerPin', 'ownerLineId', 'roleMode', 'categories',
-          'exchangeRate', 'freightCost', 'splitByQty',
+          'uid', 'ownerName', 'ownerPin', 'ownerLineId', 'promptPayId', 'promptPayName',
+          'roleMode', 'categories', 'exchangeRate', 'freightCost', 'splitByQty',
           'autoSave', 'seeded', 'createdAt', 'updatedAt'
         ]) &&
         data.uid is string && data.uid == userId && isValidId(data.uid) &&
         data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80 &&
         (!('ownerPin' in data) || (data.ownerPin is string && data.ownerPin.size() == 4 && data.ownerPin.matches('^[0-9]{4}$'))) &&
         isOptionalString(data, 'ownerLineId', 64) &&
+        isOptionalString(data, 'promptPayId', 20) &&
+        isOptionalString(data, 'promptPayName', 80) &&
         data.roleMode is string && data.roleMode in ['owner', 'staff'] &&
         data.categories is list && data.categories.size() <= 40 &&
         (data.categories.size() == 0 || (data.categories[0] is string && data.categories[0].size() >= 1 && data.categories[0].size() <= 80)) &&
@@ -279,8 +281,8 @@ service cloud.firestore {
             request.auth.uid == userId &&
             // Action: Update workspace settings
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'ownerName', 'ownerPin', 'ownerLineId', 'roleMode', 'categories',
-              'exchangeRate', 'freightCost', 'splitByQty',
+              'ownerName', 'ownerPin', 'ownerLineId', 'promptPayId', 'promptPayName',
+              'roleMode', 'categories', 'exchangeRate', 'freightCost', 'splitByQty',
               'autoSave', 'seeded', 'updatedAt'
             ])
           )

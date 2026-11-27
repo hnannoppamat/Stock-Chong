@@ -186,6 +186,8 @@ export interface LiveStoreSnapshot {
   ownerName: string;
   ownerPin: string;
   ownerLineId: string;
+  promptPayId?: string;
+  promptPayName?: string;
   categories: string[];
   products: ProductItem[];
   orders: Order[];

@@ -16,6 +16,7 @@ import {
   PrintLabelModal,
 } from "./components/Modals";
 import { MultiDeviceModal } from "./components/MultiDeviceModal";
+import { OrderPaymentQrModal } from "./components/OrderPaymentQrModal";
 import { OrdersView } from "./components/OrdersView";
 import { OwnerAuthView } from "./components/OwnerAuthView";
 import {
@@ -116,6 +117,8 @@ interface PersistedStore {
   ownerName: string;
   ownerPin: string;
   ownerLineId: string;
+  promptPayId: string;
+  promptPayName: string;
   categories: string[];
   products: ProductItem[];
   orders: Order[];
@@ -145,6 +148,8 @@ function loadInitialStore(): PersistedStore {
     ownerName: DEFAULT_OWNER_NAME,
     ownerPin: DEFAULT_OWNER_PIN,
     ownerLineId: DEFAULT_OWNER_LINE_ID,
+    promptPayId: "",
+    promptPayName: "",
     categories: INITIAL_CATEGORIES,
     products: INITIAL_PRODUCTS,
     orders: INITIAL_ORDERS,
@@ -180,6 +185,14 @@ function loadInitialStore(): PersistedStore {
           : DEFAULT_OWNER_NAME,
       ownerPin,
       ownerLineId,
+      promptPayId:
+        typeof parsed.promptPayId === "string"
+          ? parsed.promptPayId.trim().slice(0, 20)
+          : "",
+      promptPayName:
+        typeof parsed.promptPayName === "string"
+          ? parsed.promptPayName.trim().slice(0, 80)
+          : "",
       categories,
       products: Array.isArray(parsed.products)
         ? parsed.products
@@ -238,6 +251,12 @@ export default function App() {
   const [ownerLineId, setOwnerLineId] = useState<string>(
     initialStore.ownerLineId
   );
+  const [promptPayId, setPromptPayId] = useState<string>(
+    initialStore.promptPayId
+  );
+  const [promptPayName, setPromptPayName] = useState<string>(
+    initialStore.promptPayName
+  );
   const [products, setProducts] = useState<ProductItem[]>(
     initialStore.products
   );
@@ -278,6 +297,7 @@ export default function App() {
     null
   );
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
+  const [paymentQrOrder, setPaymentQrOrder] = useState<Order | null>(null);
   const [confirmingDeliveryOrder, setConfirmingDeliveryOrder] =
     useState<Order | null>(null);
   const [lowStockLineAlert, setLowStockLineAlert] = useState<{
@@ -310,6 +330,8 @@ export default function App() {
     ownerName,
     ownerPin,
     ownerLineId,
+    promptPayId,
+    promptPayName,
     categories,
     products,
     orders,
@@ -322,6 +344,8 @@ export default function App() {
     ownerName,
     ownerPin,
     ownerLineId,
+    promptPayId,
+    promptPayName,
     categories,
     products,
     orders,
@@ -684,10 +708,14 @@ export default function App() {
           ownerName: string;
           ownerPin: string;
           ownerLineId: string;
+          promptPayId: string;
+          promptPayName: string;
         }> = {};
         if (typeof p.ownerName === "string") updates.ownerName = p.ownerName;
         if (typeof p.ownerPin === "string") updates.ownerPin = p.ownerPin;
         if (typeof p.ownerLineId === "string") updates.ownerLineId = p.ownerLineId;
+        if (typeof p.promptPayId === "string") updates.promptPayId = p.promptPayId;
+        if (typeof p.promptPayName === "string") updates.promptPayName = p.promptPayName;
         if (Object.keys(updates).length > 0) {
           runCloudWrite(updateWorkspaceSettings(uid, updates));
         }
@@ -894,6 +922,7 @@ export default function App() {
         if (!orderId) return;
         setOrders((prev) => prev.filter((o) => o.id !== orderId));
         setPrintingOrder((prev) => (prev?.id === orderId ? null : prev));
+        setPaymentQrOrder((prev) => (prev?.id === orderId ? null : prev));
         setConfirmingDeliveryOrder((prev) =>
           prev?.id === orderId ? null : prev
         );
@@ -1091,6 +1120,12 @@ export default function App() {
         if (typeof p.ownerLineId === "string" && p.ownerLineId.trim()) {
           setOwnerLineId(p.ownerLineId.trim());
         }
+        if (typeof p.promptPayId === "string") {
+          setPromptPayId(p.promptPayId.trim().slice(0, 20));
+        }
+        if (typeof p.promptPayName === "string") {
+          setPromptPayName(p.promptPayName.trim().slice(0, 80));
+        }
         break;
       }
 
@@ -1120,6 +1155,12 @@ export default function App() {
           setOwnerPin(snapshot.ownerPin);
         }
         if (snapshot.ownerLineId) setOwnerLineId(snapshot.ownerLineId);
+        if (typeof snapshot.promptPayId === "string") {
+          setPromptPayId(snapshot.promptPayId.trim().slice(0, 20));
+        }
+        if (typeof snapshot.promptPayName === "string") {
+          setPromptPayName(snapshot.promptPayName.trim().slice(0, 80));
+        }
         if (Array.isArray(snapshot.categories) && snapshot.categories.length > 0) {
           setCategories(snapshot.categories);
         }
@@ -1202,6 +1243,8 @@ export default function App() {
         ownerName,
         ownerPin,
         ownerLineId,
+        promptPayId,
+        promptPayName,
         categories,
         products,
         orders,
@@ -1219,6 +1262,8 @@ export default function App() {
     ownerName,
     ownerPin,
     ownerLineId,
+    promptPayId,
+    promptPayName,
     categories,
     products,
     orders,
@@ -1333,6 +1378,12 @@ export default function App() {
             }
             if (ws.ownerLineId && ws.ownerLineId.trim()) {
               setOwnerLineId(ws.ownerLineId.trim());
+            }
+            if (typeof ws.promptPayId === "string") {
+              setPromptPayId(ws.promptPayId.trim().slice(0, 20));
+            }
+            if (typeof ws.promptPayName === "string") {
+              setPromptPayName(ws.promptPayName.trim().slice(0, 80));
             }
             if (Array.isArray(ws.categories) && ws.categories.length > 0) {
               setCategories(ws.categories);
@@ -2457,6 +2508,113 @@ export default function App() {
     );
   };
 
+  const handleUpdatePromptPayConfig = (config: {
+    promptPayId: string;
+    promptPayName: string;
+  }) => {
+    const cleanId = config.promptPayId.trim().slice(0, 20);
+    const cleanName = config.promptPayName.trim().slice(0, 80);
+    setPromptPayId(cleanId);
+    setPromptPayName(cleanName);
+    emitLiveAction("settings:update", {
+      promptPayId: cleanId,
+      promptPayName: cleanName,
+    });
+    if (cloudUser) {
+      runCloudWrite(
+        updateWorkspaceSettings(cloudUser.uid, {
+          promptPayId: cleanId,
+          promptPayName: cleanName,
+        }),
+        "บันทึกบัญชีพร้อมเพย์ขึ้นคลาวด์ไม่สำเร็จ"
+      );
+    }
+    showToast("บันทึกบัญชีรับเงินพร้อมเพย์ (QR) เรียบร้อยแล้ว", "qr_code_2");
+  };
+
+  const handleRecordPromptPayPayment = (
+    order: Order,
+    paidAmountThb: number
+  ) => {
+    const amount = Number.isFinite(paidAmountThb) && paidAmountThb > 0
+      ? Number(paidAmountThb.toFixed(2))
+      : order.totalThb;
+    const existing = accountingEntries.find(
+      (e) => e.sourceOrderId === order.id
+    );
+
+    if (existing) {
+      const updatedFields: Omit<AccountingEntry, "id"> = {
+        date: existing.date || getTodayIso(),
+        type: "income",
+        category: existing.category || "ยอดขายสินค้า",
+        title: `รับโอนพร้อมเพย์ออเดอร์ #${order.id} (${order.customerName})`,
+        amountThb: amount,
+        paymentMethod: "พร้อมเพย์",
+        referenceCode: existing.referenceCode || order.id,
+        note:
+          existing.note ||
+          order.items
+            .map(
+              (i) =>
+                `${i.name}${i.colorName ? `(${i.colorName})` : ""} x${i.quantity}`
+            )
+            .join(", "),
+        sourceOrderId: order.id,
+        ...(existing.receiptImageUrl
+          ? { receiptImageUrl: existing.receiptImageUrl }
+          : {}),
+      };
+      setAccountingEntries((prev) =>
+        prev.map((e) =>
+          e.id === existing.id ? { id: existing.id, ...updatedFields } : e
+        )
+      );
+      emitLiveAction("accounting:update", {
+        entryId: existing.id,
+        updates: updatedFields,
+      });
+      if (cloudUser) {
+        runCloudWrite(
+          updateAccountingDoc(cloudUser.uid, existing.id, updatedFields),
+          "อัปเดตรายการรับโอนพร้อมเพย์บนคลาวด์ไม่สำเร็จ"
+        );
+      }
+    } else {
+      const accId = makeId("acc");
+      const entryData: Omit<AccountingEntry, "id"> = {
+        date: getTodayIso(),
+        type: "income",
+        category: "ยอดขายสินค้า",
+        title: `รับโอนพร้อมเพย์ออเดอร์ #${order.id} (${order.customerName})`,
+        amountThb: amount,
+        paymentMethod: "พร้อมเพย์",
+        referenceCode: order.id,
+        note: order.items
+          .map(
+            (i) =>
+              `${i.name}${i.colorName ? `(${i.colorName})` : ""} x${i.quantity}`
+          )
+          .join(", "),
+        sourceOrderId: order.id,
+      };
+      const created: AccountingEntry = { id: accId, ...entryData };
+      setAccountingEntries((prev) => [created, ...prev]);
+      emitLiveAction("accounting:create", { entry: created });
+      if (cloudUser) {
+        runCloudWrite(
+          createAccountingDoc(cloudUser.uid, accId, entryData),
+          "บันทึกรับโอนพร้อมเพย์ลงคลาวด์ไม่สำเร็จ"
+        );
+      }
+    }
+
+    showToast(
+      `ยืนยันรับโอนพร้อมเพย์ #${order.id} (฿${amount.toLocaleString()}) และบันทึกลงบัญชีแล้ว`,
+      "task_alt"
+    );
+  };
+
   // --- Customer & Owner Delete Handlers ---
 
   const handleCreateCustomer = (data: Omit<Customer, "id" | "createdAt">) => {
@@ -2578,6 +2736,7 @@ export default function App() {
     if (role !== "owner") return;
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
     setPrintingOrder((prev) => (prev?.id === orderId ? null : prev));
+    setPaymentQrOrder((prev) => (prev?.id === orderId ? null : prev));
     setConfirmingDeliveryOrder((prev) => (prev?.id === orderId ? null : prev));
     emitLiveAction("order:delete", { orderId });
     if (cloudUser) {
@@ -2777,6 +2936,7 @@ export default function App() {
             onSelectProductForEdit={(prod) => setEditingProduct(prod)}
             onConfirmPack={handleConfirmPack}
             onMarkReadyToShip={handleMarkReadyToShip}
+            onOpenPaymentQr={(order) => setPaymentQrOrder(order)}
             onNotifyLowStockLine={(items) =>
               openLowStockLineAlert(items, "รายการสินค้าใกล้หมด/ต้องสั่งเติม")
             }
@@ -2824,6 +2984,7 @@ export default function App() {
             onMarkReadyToShip={handleMarkReadyToShip}
             onConfirmShip={handleConfirmShip}
             onOpenPrintLabel={(order) => setPrintingOrder(order)}
+            onOpenPaymentQr={(order) => setPaymentQrOrder(order)}
             onOpenDeliveryConfirm={(order) => setConfirmingDeliveryOrder(order)}
             onDeleteOrder={handleDeleteOrder}
           />
@@ -2880,6 +3041,9 @@ export default function App() {
               }
               showToast(`อัปเดต LINE ID แจ้งเตือนเป็น "${newLineId}" แล้ว`, "chat");
             }}
+            promptPayId={promptPayId}
+            promptPayName={promptPayName}
+            onUpdatePromptPayConfig={handleUpdatePromptPayConfig}
             onTestLineAutoNotify={() =>
               void dispatchAutoLineAlert(
                 "test",
@@ -3017,6 +3181,25 @@ export default function App() {
           onPrinted={(orderId) =>
             showToast(`กำลังส่งคำสั่งพิมพ์ใบปะหน้า #${orderId}`, "print")
           }
+        />
+      )}
+
+      {paymentQrOrder && (
+        <OrderPaymentQrModal
+          order={paymentQrOrder}
+          role={role}
+          ownerName={ownerName}
+          promptPayId={promptPayId}
+          promptPayName={promptPayName}
+          isAlreadyRecordedInAccounting={accountingEntries.some(
+            (e) =>
+              e.sourceOrderId === paymentQrOrder.id &&
+              e.paymentMethod === "พร้อมเพย์"
+          )}
+          onSavePromptPayConfig={handleUpdatePromptPayConfig}
+          onRecordPromptPayPayment={handleRecordPromptPayPayment}
+          onNotify={showToast}
+          onClose={() => setPaymentQrOrder(null)}
         />
       )}
 

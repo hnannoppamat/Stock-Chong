@@ -47,6 +47,8 @@ interface RoomState {
   ownerName: string;
   ownerPin: string;
   ownerLineId: string;
+  promptPayId: string;
+  promptPayName: string;
   categories: string[];
   products: Record<string, unknown>[];
   orders: Record<string, unknown>[];
@@ -93,6 +95,8 @@ function createEmptyRoomState(): RoomState {
     ownerName: "คุณธนวัฒน์",
     ownerPin: "4145",
     ownerLineId: "Hnan145",
+    promptPayId: "",
+    promptPayName: "",
     categories: [],
     products: [],
     orders: [],
@@ -109,6 +113,8 @@ function computeStateDigest(state: RoomState): string {
     ownerName: state.ownerName,
     ownerPin: state.ownerPin,
     ownerLineId: state.ownerLineId,
+    promptPayId: state.promptPayId,
+    promptPayName: state.promptPayName,
     categories: state.categories,
     products: state.products,
     orders: state.orders,
@@ -161,6 +167,12 @@ function applyHydrateState(target: RoomState, incoming: Record<string, unknown>)
     target.ownerPin = incoming.ownerPin;
   }
   target.ownerLineId = sanitizeShortString(incoming.ownerLineId, 64, target.ownerLineId);
+  if (typeof incoming.promptPayId === "string") {
+    target.promptPayId = incoming.promptPayId.trim().slice(0, 20);
+  }
+  if (typeof incoming.promptPayName === "string") {
+    target.promptPayName = incoming.promptPayName.trim().slice(0, 80);
+  }
   const cats = coerceStringArray(incoming.categories);
   if (cats.length > 0) target.categories = cats;
   target.products = coerceArray(incoming.products, 1000);
@@ -182,6 +194,8 @@ function snapshotPublicState(state: RoomState) {
     ownerName: state.ownerName,
     ownerPin: state.ownerPin,
     ownerLineId: state.ownerLineId,
+    promptPayId: state.promptPayId,
+    promptPayName: state.promptPayName,
     categories: state.categories,
     products: state.products,
     orders: state.orders,
@@ -869,6 +883,14 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
           s.ownerLineId = payload.ownerLineId.trim().slice(0, 64);
           updates.ownerLineId = s.ownerLineId;
         }
+        if (typeof payload.promptPayId === "string") {
+          s.promptPayId = payload.promptPayId.trim().slice(0, 20);
+          updates.promptPayId = s.promptPayId;
+        }
+        if (typeof payload.promptPayName === "string") {
+          s.promptPayName = payload.promptPayName.trim().slice(0, 80);
+          updates.promptPayName = s.promptPayName;
+        }
         if (Object.keys(updates).length === 0) return { applied: false };
         s.version += 1;
         return { applied: true, broadcastPayload: updates };
@@ -1032,6 +1054,8 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
         nextCandidate.ownerName = ctx.state.ownerName;
         nextCandidate.ownerPin = ctx.state.ownerPin;
         nextCandidate.ownerLineId = ctx.state.ownerLineId;
+        nextCandidate.promptPayId = ctx.state.promptPayId;
+        nextCandidate.promptPayName = ctx.state.promptPayName;
         nextCandidate.categories = [...ctx.state.categories];
         applyHydrateState(nextCandidate, incomingState);
 

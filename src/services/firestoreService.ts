@@ -47,6 +47,8 @@ import {
 export const LIMITS = {
   OWNER_NAME_MAX: 80,
   OWNER_LINE_ID_MAX: 64,
+  PROMPTPAY_ID_MAX: 20,
+  PROMPTPAY_NAME_MAX: 80,
   PRODUCT_NAME_MAX: 160,
   SKU_MAX: 64,
   CATEGORY_MAX: 80,
@@ -92,6 +94,8 @@ export interface WorkspaceDoc {
   ownerName: string;
   ownerPin?: string;
   ownerLineId?: string;
+  promptPayId?: string;
+  promptPayName?: string;
   roleMode: RoleMode;
   categories: string[];
   exchangeRate: number;
@@ -105,6 +109,8 @@ export interface LocalSeedSnapshot {
   ownerName?: string;
   ownerPin?: string;
   ownerLineId?: string;
+  promptPayId?: string;
+  promptPayName?: string;
   categories?: string[];
   products?: ProductItem[];
   orders?: Order[];
@@ -324,23 +330,39 @@ export async function ensureUserWorkspace(
           .map((c) => clampString(c, LIMITS.CATEGORY_MAX))
       : INITIAL_CATEGORIES.slice(0, LIMITS.CATEGORIES_COUNT_MAX);
 
+  const seedPromptPayId =
+    typeof seedSnapshot?.promptPayId === "string" &&
+    seedSnapshot.promptPayId.trim().length > 0
+      ? seedSnapshot.promptPayId.trim().slice(0, LIMITS.PROMPTPAY_ID_MAX)
+      : undefined;
+  const seedPromptPayName =
+    typeof seedSnapshot?.promptPayName === "string" &&
+    seedSnapshot.promptPayName.trim().length > 0
+      ? seedSnapshot.promptPayName.trim().slice(0, LIMITS.PROMPTPAY_NAME_MAX)
+      : undefined;
+
   // Step 1: Create parent workspace document first so workspaceExists(uid) passes for subcollections
   try {
-    await setDoc(workspaceRef, {
-      uid,
-      ownerName: seedOwnerName,
-      ownerPin: seedOwnerPin,
-      ownerLineId: seedOwnerLineId,
-      roleMode: "staff",
-      categories: seedCategories,
-      exchangeRate: 4.95,
-      freightCost: 1250,
-      splitByQty: true,
-      autoSave: true,
-      seeded: true,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    await setDoc(
+      workspaceRef,
+      stripUndefined({
+        uid,
+        ownerName: seedOwnerName,
+        ownerPin: seedOwnerPin,
+        ownerLineId: seedOwnerLineId,
+        promptPayId: seedPromptPayId,
+        promptPayName: seedPromptPayName,
+        roleMode: "staff",
+        categories: seedCategories,
+        exchangeRate: 4.95,
+        freightCost: 1250,
+        splitByQty: true,
+        autoSave: true,
+        seeded: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, workspacePath);
   }
@@ -867,6 +889,8 @@ export async function updateWorkspaceSettings(
     ownerName: string;
     ownerPin: string;
     ownerLineId: string;
+    promptPayId: string;
+    promptPayName: string;
     roleMode: RoleMode;
     categories: string[];
     exchangeRate: number;
@@ -889,6 +913,12 @@ export async function updateWorkspaceSettings(
       LIMITS.OWNER_LINE_ID_MAX,
       "Hnan145"
     );
+  }
+  if (updates.promptPayId !== undefined) {
+    clean.promptPayId = updates.promptPayId.trim().slice(0, LIMITS.PROMPTPAY_ID_MAX);
+  }
+  if (updates.promptPayName !== undefined) {
+    clean.promptPayName = updates.promptPayName.trim().slice(0, LIMITS.PROMPTPAY_NAME_MAX);
   }
   if (updates.roleMode !== undefined) {
     clean.roleMode = updates.roleMode === "staff" ? "staff" : "owner";
@@ -1604,6 +1634,12 @@ export async function syncFullWorkspaceToCloud(
   }
   if (snapshot.ownerLineId && snapshot.ownerLineId.trim()) {
     settingsPatch.ownerLineId = snapshot.ownerLineId.trim();
+  }
+  if (typeof snapshot.promptPayId === "string" && snapshot.promptPayId.trim()) {
+    settingsPatch.promptPayId = snapshot.promptPayId.trim();
+  }
+  if (typeof snapshot.promptPayName === "string" && snapshot.promptPayName.trim()) {
+    settingsPatch.promptPayName = snapshot.promptPayName.trim();
   }
   if (Array.isArray(snapshot.categories) && snapshot.categories.length > 0) {
     settingsPatch.categories = snapshot.categories;

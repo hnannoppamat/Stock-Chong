@@ -13,6 +13,7 @@ interface DashboardOverviewWidgetsProps {
   onQuickCreateOrderForProduct: (product: ProductItem) => void;
   onConfirmPack: (orderId: string) => void;
   onMarkReadyToShip: (orderId: string) => void;
+  onOpenPaymentQr: (order: Order) => void;
   onNavigateAccounting: () => void;
   onQuickCreateOrder: () => void;
   onFilterLowStockInInventory: () => void;
@@ -143,6 +144,7 @@ export function DashboardOverviewWidgets({
   onQuickCreateOrderForProduct,
   onConfirmPack,
   onMarkReadyToShip,
+  onOpenPaymentQr,
   onNavigateAccounting,
   onQuickCreateOrder,
   onFilterLowStockInInventory,
@@ -716,35 +718,42 @@ export function DashboardOverviewWidgets({
                         ))}
                       </div>
 
-                      {(order.status === "pending" ||
-                        order.status === "packing") && (
-                        <div className="pt-2 border-t border-surface-container flex items-center justify-end gap-2">
-                          {order.status === "pending" && (
-                            <button
-                              type="button"
-                              onClick={() => onConfirmPack(order.id)}
-                              className="h-9 px-3.5 rounded-lg bg-primary text-on-primary hover:bg-primary-dim text-[12px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">
-                                check_circle
-                              </span>
-                              <span>แพ็คเสร็จ &amp; ตัดสต็อก</span>
-                            </button>
-                          )}
-                          {order.status === "packing" && (
-                            <button
-                              type="button"
-                              onClick={() => onMarkReadyToShip(order.id)}
-                              className="h-9 px-3.5 rounded-lg bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary text-[12px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">
-                                outbox
-                              </span>
-                              <span>เปลี่ยนเป็นรอจัดส่ง</span>
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      <div className="pt-2 border-t border-surface-container flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onOpenPaymentQr(order)}
+                          className="h-9 px-3.5 rounded-lg bg-[#113566] hover:bg-[#0d2a52] text-white text-[12px] font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap mr-auto transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">
+                            qr_code_2
+                          </span>
+                          <span>สร้าง QR ชำระเงิน</span>
+                        </button>
+                        {order.status === "pending" && (
+                          <button
+                            type="button"
+                            onClick={() => onConfirmPack(order.id)}
+                            className="h-9 px-3.5 rounded-lg bg-primary text-on-primary hover:bg-primary-dim text-[12px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">
+                              check_circle
+                            </span>
+                            <span>แพ็คเสร็จ &amp; ตัดสต็อก</span>
+                          </button>
+                        )}
+                        {order.status === "packing" && (
+                          <button
+                            type="button"
+                            onClick={() => onMarkReadyToShip(order.id)}
+                            className="h-9 px-3.5 rounded-lg bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary text-[12px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">
+                              outbox
+                            </span>
+                            <span>เปลี่ยนเป็นรอจัดส่ง</span>
+                          </button>
+                        )}
+                      </div>
 
                       {role === "owner" && (
                         <div className="pt-2 border-t border-surface-container flex items-center justify-end gap-2">

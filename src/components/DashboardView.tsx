@@ -37,6 +37,7 @@ interface DashboardViewProps {
   onSelectProductForEdit: (product: ProductItem) => void;
   onConfirmPack: (orderId: string) => void;
   onMarkReadyToShip: (orderId: string) => void;
+  onOpenPaymentQr: (order: Order) => void;
   onNotifyLowStockLine: (items: ProductItem[]) => void;
   onDeleteOrder: (orderId: string) => void;
   onDeleteProduct: (productId: string) => void;
@@ -125,6 +126,7 @@ export function DashboardView({
   onSelectProductForEdit,
   onConfirmPack,
   onMarkReadyToShip,
+  onOpenPaymentQr,
   onNotifyLowStockLine,
   onDeleteOrder,
   onDeleteProduct,
@@ -273,6 +275,7 @@ export function DashboardView({
         onQuickCreateOrderForProduct={onQuickCreateOrderForProduct}
         onConfirmPack={onConfirmPack}
         onMarkReadyToShip={onMarkReadyToShip}
+        onOpenPaymentQr={onOpenPaymentQr}
         onNavigateAccounting={onNavigateAccounting}
         onQuickCreateOrder={onQuickCreateOrder}
         onFilterLowStockInInventory={() => onNavigateInventory("low")}

@@ -28,6 +28,7 @@ interface OrdersViewProps {
     }
   ) => void;
   onOpenPrintLabel: (order: Order) => void;
+  onOpenPaymentQr: (order: Order) => void;
   onOpenDeliveryConfirm: (order: Order) => void;
   onDeleteOrder: (orderId: string) => void;
 }
@@ -103,6 +104,7 @@ export function OrdersView({
   onMarkReadyToShip,
   onConfirmShip,
   onOpenPrintLabel,
+  onOpenPaymentQr,
   onOpenDeliveryConfirm,
   onDeleteOrder,
 }: OrdersViewProps) {
@@ -860,7 +862,18 @@ export function OrdersView({
                 )}
 
                 {/* Actions Footer */}
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onOpenPaymentQr(order)}
+                    className="min-h-[46px] px-3 rounded-lg bg-[#113566] hover:bg-[#0d2a52] text-white font-semibold text-[12.5px] flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] transition-all cursor-pointer shrink-0"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      qr_code_2
+                    </span>
+                    <span className="whitespace-nowrap">QR ชำระเงิน</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => {
