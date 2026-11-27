@@ -15,6 +15,8 @@ interface HeaderProps {
   onSelectLowStockProduct: (product: ProductItem) => void;
   notifications: AppNotification[];
   onMarkAllRead: () => void;
+  onDeleteNotification: (notiId: string) => void;
+  onClearAllNotifications: () => void;
   onSelectNotification: (noti: AppNotification) => void;
 }
 
@@ -32,6 +34,8 @@ export function Header({
   onSelectLowStockProduct,
   notifications,
   onMarkAllRead,
+  onDeleteNotification,
+  onClearAllNotifications,
   onSelectNotification,
 }: HeaderProps) {
   const [openNoti, setOpenNoti] = useState(false);
@@ -57,9 +61,14 @@ export function Header({
 
   const navItems: { id: TabId; label: string; icon: string; badge?: number }[] = [
     {
-      id: "inventory",
+      id: "dashboard",
       label: "แดชบอร์ด",
       icon: "dashboard",
+    },
+    {
+      id: "inventory",
+      label: "คลังสินค้า",
+      icon: "inventory_2",
       badge: lowStockProducts.length > 0 ? lowStockProducts.length : undefined,
     },
     ...(role === "owner"
@@ -76,7 +85,7 @@ export function Header({
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => onTabChange("inventory")}
+            onClick={() => onTabChange("dashboard")}
             className="text-[16px] leading-6 font-bold text-primary tracking-tight whitespace-nowrap cursor-pointer"
           >
             DenewStock
@@ -106,7 +115,7 @@ export function Header({
                 key={item.id}
                 type="button"
                 onClick={() => onTabChange(item.id)}
-                className={`px-3.5 py-1.5 rounded-lg text-[13px] font-medium flex items-center gap-1.5 whitespace-nowrap transition-all cursor-pointer ${
+                className={`px-2.5 lg:px-3 py-1.5 rounded-lg text-[13px] font-medium flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
                   isActive
                     ? "bg-surface-container-lowest text-primary shadow-sm font-semibold"
                     : "text-on-surface-variant hover:text-on-surface"
@@ -201,19 +210,33 @@ export function Header({
 
           {openNoti && (
             <div className="absolute right-0 top-13 w-84 max-w-[calc(100vw-2rem)] bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/60 p-3 z-50">
-              <div className="flex items-center justify-between pb-2 border-b border-surface-container">
+              <div className="flex items-center justify-between pb-2 border-b border-surface-container gap-2">
                 <span className="text-[14px] font-semibold text-on-surface">
                   การแจ้งเตือน ({totalAlertCount})
                 </span>
-                {unreadCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={onMarkAllRead}
-                    className="text-[11px] font-medium text-primary hover:underline cursor-pointer"
-                  >
-                    อ่านทั้งหมด
-                  </button>
-                )}
+                <div className="flex items-center gap-2 shrink-0">
+                  {unreadCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={onMarkAllRead}
+                      className="text-[11px] font-medium text-primary hover:underline cursor-pointer"
+                    >
+                      อ่านทั้งหมด
+                    </button>
+                  )}
+                  {role === "owner" && notifications.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={onClearAllNotifications}
+                      className="text-[11px] font-semibold text-error hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">
+                        delete_sweep
+                      </span>
+                      <span>ลบทั้งหมด</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Low-Stock Reorder Alert Section inside Notification Bell */}
@@ -289,42 +312,61 @@ export function Header({
                   </p>
                 ) : (
                   notifications.map((noti) => (
-                    <button
+                    <div
                       key={noti.id}
-                      type="button"
-                      onClick={() => {
-                        onSelectNotification(noti);
-                        setOpenNoti(false);
-                      }}
-                      className={`text-left p-2.5 rounded-lg transition-colors flex items-start gap-2.5 cursor-pointer ${
+                      className={`p-2.5 rounded-lg transition-colors flex items-start gap-2 ${
                         noti.read
                           ? "bg-surface-container-low/50 hover:bg-surface-container-low"
                           : "bg-primary-fixed/20 hover:bg-primary-fixed/30"
                       }`}
                     >
-                      <span className="material-symbols-outlined text-[18px] text-primary shrink-0 mt-0.5">
-                        {noti.type === "order"
-                          ? "receipt_long"
-                          : noti.type === "stock"
-                            ? "warning"
-                            : noti.type === "approval"
-                              ? "approval"
-                              : "info"}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[12px] font-semibold text-on-surface truncate">
-                            {noti.title}
-                          </span>
-                          <span className="text-[10px] text-on-surface-variant shrink-0">
-                            {noti.time}
-                          </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSelectNotification(noti);
+                          setOpenNoti(false);
+                        }}
+                        className="text-left flex items-start gap-2.5 flex-1 min-w-0 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px] text-primary shrink-0 mt-0.5">
+                          {noti.type === "order"
+                            ? "receipt_long"
+                            : noti.type === "stock"
+                              ? "warning"
+                              : noti.type === "approval"
+                                ? "approval"
+                                : "info"}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[12px] font-semibold text-on-surface truncate">
+                              {noti.title}
+                            </span>
+                            <span className="text-[10px] text-on-surface-variant shrink-0">
+                              {noti.time}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-on-surface-variant mt-0.5 line-clamp-2">
+                            {noti.detail}
+                          </p>
                         </div>
-                        <p className="text-[11px] text-on-surface-variant mt-0.5 line-clamp-2">
-                          {noti.detail}
-                        </p>
-                      </div>
-                    </button>
+                      </button>
+                      {role === "owner" && (
+                        <button
+                          type="button"
+                          aria-label="ลบการแจ้งเตือนนี้"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteNotification(noti.id);
+                          }}
+                          className="w-7 h-7 rounded-md hover:bg-error-container text-on-surface-variant hover:text-error flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">
+                            delete
+                          </span>
+                        </button>
+                      )}
+                    </div>
                   ))
                 )}
               </div>

@@ -832,6 +832,7 @@ interface EditProductModalProps {
   pendingRequest: StockApprovalRequest | null;
   onClose: () => void;
   onUpdateOwner: (updated: ProductItem) => void;
+  onDeleteProduct: (productId: string) => void;
   onUpdateProductDetails: (
     updated: Pick<
       ProductItem,
@@ -873,6 +874,7 @@ export function EditProductModal({
   pendingRequest,
   onClose,
   onUpdateOwner,
+  onDeleteProduct,
   onUpdateProductDetails,
   onRequestStockChange,
   onSwitchToOwnerAuth,
@@ -889,6 +891,7 @@ export function EditProductModal({
   const [landedCost, setLandedCost] = useState(String(product.landedCostThb));
   const [stock, setStock] = useState(String(product.stock));
   const [reason, setReason] = useState("ตรวจนับสต็อกจริงหน้าร้าน");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const [submittedRequest, setSubmittedRequest] =
     useState<StockApprovalRequest | null>(null);
@@ -1358,20 +1361,59 @@ export function EditProductModal({
           </div>
 
           {role === "owner" ? (
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 h-11 rounded-xl bg-surface-container text-on-surface font-semibold text-[14px] cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="submit"
-                className="flex-[1.5] h-11 rounded-xl bg-primary text-on-primary font-semibold text-[14px] shadow-md cursor-pointer hover:bg-primary-dim"
-              >
-                บันทึกการแก้ไขทั้งหมด
-              </button>
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 h-11 rounded-xl bg-surface-container text-on-surface font-semibold text-[14px] cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="flex-[1.5] h-11 rounded-xl bg-primary text-on-primary font-semibold text-[14px] shadow-md cursor-pointer hover:bg-primary-dim"
+                >
+                  บันทึกการแก้ไขทั้งหมด
+                </button>
+              </div>
+              {confirmDelete ? (
+                <div className="rounded-xl bg-error-container/50 border border-error/30 px-3 py-2 flex items-center justify-between gap-2 text-[12px]">
+                  <span className="font-semibold text-error">
+                    ยืนยันลบสินค้า "{product.name}"?
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDeleteProduct(product.id);
+                        onClose();
+                      }}
+                      className="h-8 px-3 rounded-lg bg-error text-on-error text-[12px] font-semibold cursor-pointer"
+                    >
+                      ยืนยันลบ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(false)}
+                      className="h-8 px-2.5 rounded-lg bg-surface-container-lowest text-on-surface-variant text-[12px] font-medium cursor-pointer"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  className="w-full h-10 rounded-xl bg-error-container/55 hover:bg-error text-error hover:text-on-error font-semibold text-[13px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    delete
+                  </span>
+                  <span>ลบสินค้านี้ออกจากคลัง</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2 pt-1">

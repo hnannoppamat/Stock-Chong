@@ -21,9 +21,14 @@ export function BottomNav({
 }: BottomNavProps) {
   const tabs: { id: TabId; label: string; icon: string; badge?: number }[] = [
     {
-      id: "inventory",
+      id: "dashboard",
       label: "แดชบอร์ด",
       icon: "dashboard",
+    },
+    {
+      id: "inventory",
+      label: "คลังสินค้า",
+      icon: "inventory_2",
       badge: lowStockCount > 0 ? lowStockCount : undefined,
     },
     ...(role === "owner"
@@ -42,7 +47,7 @@ export function BottomNav({
     },
     {
       id: "owner-auth",
-      label: role === "staff" ? "พนักงาน" : ownerName,
+      label: role === "staff" ? "พนักงาน" : "เจ้าของ",
       icon: role === "staff" ? "badge" : "admin_panel_settings",
       badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : undefined,
     },
@@ -54,8 +59,8 @@ export function BottomNav({
       className="md:hidden fixed bottom-0 left-0 right-0 z-50 pb-safe bg-surface/90 backdrop-blur-xl shadow-[0_-1px_8px_rgba(0,0,0,0.04)] border-t border-outline-variant/20"
     >
       <div
-        className={`grid items-center h-16 px-1 ${
-          role === "owner" ? "grid-cols-5" : "grid-cols-4"
+        className={`grid items-center h-16 px-0.5 ${
+          role === "owner" ? "grid-cols-6" : "grid-cols-5"
         }`}
       >
         {tabs.map((tab) => {
@@ -66,24 +71,24 @@ export function BottomNav({
               type="button"
               onClick={() => onTabChange(tab.id)}
               aria-current={isActive ? "page" : undefined}
-              className={`relative flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] px-2 transition-colors cursor-pointer ${
+              className={`relative flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] px-1 transition-colors cursor-pointer ${
                 isActive
                   ? "text-primary font-semibold"
                   : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
               <span
-                className={`material-symbols-outlined text-[24px] ${
+                className={`material-symbols-outlined text-[22px] ${
                   isActive ? "material-symbols-filled" : ""
                 }`}
               >
                 {tab.icon}
               </span>
-              <span className="text-[11px] leading-[14px] tracking-[0.03em] whitespace-nowrap">
+              <span className="text-[10px] leading-[13px] tracking-[0.01em] whitespace-nowrap truncate max-w-full">
                 {tab.label}
               </span>
               {tab.badge !== undefined && (
-                <span className="absolute top-1.5 right-4 min-w-[16px] h-4 px-1 rounded-full bg-error text-on-error text-[10px] font-semibold flex items-center justify-center tabular-nums">
+                <span className="absolute top-1 right-2 min-w-[15px] h-[15px] px-1 rounded-full bg-error text-on-error text-[9px] font-semibold flex items-center justify-center tabular-nums">
                   {tab.badge}
                 </span>
               )}

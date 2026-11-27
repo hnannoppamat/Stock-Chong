@@ -29,6 +29,7 @@ interface OrdersViewProps {
   ) => void;
   onOpenPrintLabel: (order: Order) => void;
   onOpenDeliveryConfirm: (order: Order) => void;
+  onDeleteOrder: (orderId: string) => void;
 }
 
 const COURIERS: CourierName[] = [
@@ -103,7 +104,11 @@ export function OrdersView({
   onConfirmShip,
   onOpenPrintLabel,
   onOpenDeliveryConfirm,
+  onDeleteOrder,
 }: OrdersViewProps) {
+  const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState<string | null>(
+    null
+  );
   const [shippingOptionByOrder, setShippingOptionByOrder] = useState<
     Record<string, ShippingOption>
   >({});
@@ -487,13 +492,50 @@ export function OrdersView({
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
-                    <p className="text-[11px] text-on-surface-variant">
-                      ยอดรวม
-                    </p>
-                    <p className="text-[18px] font-semibold text-primary tabular-nums">
-                      ฿{order.totalThb.toLocaleString()}
-                    </p>
+                  <div className="flex items-start gap-2 shrink-0">
+                    <div className="text-right">
+                      <p className="text-[11px] text-on-surface-variant">
+                        ยอดรวม
+                      </p>
+                      <p className="text-[18px] font-semibold text-primary tabular-nums">
+                        ฿{order.totalThb.toLocaleString()}
+                      </p>
+                    </div>
+                    {role === "owner" && (
+                      confirmDeleteOrderId === order.id ? (
+                        <div className="flex items-center gap-1 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDeleteOrder(order.id);
+                              setConfirmDeleteOrderId(null);
+                            }}
+                            className="h-8 px-2.5 rounded-lg bg-error text-on-error text-[11px] font-semibold cursor-pointer"
+                          >
+                            ยืนยันลบ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteOrderId(null)}
+                            className="h-8 px-2 rounded-lg bg-surface-container text-on-surface-variant text-[11px] font-medium cursor-pointer"
+                          >
+                            ยกเลิก
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          aria-label={`ลบออเดอร์ ${order.id}`}
+                          title="ลบออเดอร์นี้"
+                          onClick={() => setConfirmDeleteOrderId(order.id)}
+                          className="w-8 h-8 rounded-lg bg-error-container/50 hover:bg-error text-error hover:text-on-error flex items-center justify-center transition-colors cursor-pointer mt-0.5"
+                        >
+                          <span className="material-symbols-outlined text-[17px]">
+                            delete
+                          </span>
+                        </button>
+                      )
+                    )}
                   </div>
                 </div>
 

@@ -1,6 +1,7 @@
 export type TabId =
-  | "ai-scanner"
+  | "dashboard"
   | "inventory"
+  | "ai-scanner"
   | "orders"
   | "customers"
   | "owner-auth";
@@ -34,6 +35,24 @@ export interface ScannedBillItem {
   quantity: number;
   unitPriceCny: number;
   imageUrl?: string;
+  productType?: string;
+  material?: string;
+  colorVariants?: string[];
+  sizeSpec?: string;
+  suggestedSellPriceThb?: number;
+  aiReason?: string;
+  isNewCategory?: boolean;
+  matchedExistingSku?: string;
+  confidence?: number;
+}
+
+export interface BillAiAnalysis {
+  summary: string;
+  supplierType?: string;
+  currencyDetected?: string;
+  keyHighlights: string[];
+  suggestedNewCategories?: string[];
+  analyzedAt?: string;
 }
 
 export interface ScannedInvoice {
@@ -42,6 +61,7 @@ export interface ScannedInvoice {
   confidence: number;
   imageUrl: string;
   items: ScannedBillItem[];
+  aiAnalysis?: BillAiAnalysis;
 }
 
 export interface ProductColorVariant {

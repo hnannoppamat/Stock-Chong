@@ -16,6 +16,8 @@ interface DashboardOverviewWidgetsProps {
   onNavigateScanner: () => void;
   onQuickCreateOrder: () => void;
   onFilterLowStockInInventory: () => void;
+  onDeleteOrder: (orderId: string) => void;
+  onDeleteProduct: (productId: string) => void;
 }
 
 type StockAlertFilter = "all" | "critical" | "color_out";
@@ -144,6 +146,8 @@ export function DashboardOverviewWidgets({
   onNavigateScanner,
   onQuickCreateOrder,
   onFilterLowStockInInventory,
+  onDeleteOrder,
+  onDeleteProduct,
 }: DashboardOverviewWidgetsProps) {
   const [selectedOrderStatus, setSelectedOrderStatus] =
     useState<OrderStatus | null>(null);
@@ -152,6 +156,11 @@ export function DashboardOverviewWidgets({
   >(null);
   const [stockAlertFilter, setStockAlertFilter] =
     useState<StockAlertFilter>("all");
+  const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState<
+    string | null
+  >(null);
+  const [confirmDeleteAlertProduct, setConfirmDeleteAlertProduct] =
+    useState(false);
 
   // Group orders by status with totals
   const ordersByStatus = useMemo(() => {
@@ -736,6 +745,46 @@ export function DashboardOverviewWidgets({
                           )}
                         </div>
                       )}
+
+                      {role === "owner" && (
+                        <div className="pt-2 border-t border-surface-container flex items-center justify-end gap-2">
+                          {confirmDeleteOrderId === order.id ? (
+                            <>
+                              <span className="text-[11px] font-semibold text-error mr-auto">
+                                ยืนยันลบออเดอร์ #{order.id}?
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onDeleteOrder(order.id);
+                                  setConfirmDeleteOrderId(null);
+                                }}
+                                className="h-8 px-3 rounded-lg bg-error text-on-error text-[11px] font-semibold cursor-pointer"
+                              >
+                                ยืนยันลบ
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteOrderId(null)}
+                                className="h-8 px-2.5 rounded-lg bg-surface-container text-on-surface-variant text-[11px] font-medium cursor-pointer"
+                              >
+                                ยกเลิก
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteOrderId(order.id)}
+                              className="h-8 px-3 rounded-lg bg-error-container/50 hover:bg-error text-error hover:text-on-error text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">
+                                delete
+                              </span>
+                              <span>ลบออเดอร์</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -1076,12 +1125,49 @@ export function DashboardOverviewWidgets({
                         <span className="hidden sm:inline">สแกนบิล</span>
                       </button>
                     )}
+                    {role === "owner" && (
+                      confirmDeleteAlertProduct ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const prodId = selectedAlertProduct.id;
+                              setConfirmDeleteAlertProduct(false);
+                              setSelectedAlertProductId(null);
+                              onDeleteProduct(prodId);
+                            }}
+                            className="h-10 px-3 rounded-lg bg-error text-on-error text-[12px] font-semibold cursor-pointer whitespace-nowrap"
+                          >
+                            ยืนยันลบสินค้า
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteAlertProduct(false)}
+                            className="h-10 px-2.5 rounded-lg bg-surface-container text-on-surface-variant text-[12px] font-medium cursor-pointer"
+                          >
+                            ยกเลิก
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteAlertProduct(true)}
+                          className="h-10 px-3 rounded-lg bg-error-container/60 hover:bg-error text-error hover:text-on-error text-[12px] font-semibold flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">
+                            delete
+                          </span>
+                          <span>ลบสินค้า</span>
+                        </button>
+                      )
+                    )}
                   </div>
 
                   <button
                     type="button"
                     onClick={() => {
                       const prod = selectedAlertProduct;
+                      setConfirmDeleteAlertProduct(false);
                       setSelectedAlertProductId(null);
                       onSelectProductForEdit(prod);
                     }}

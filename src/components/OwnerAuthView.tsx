@@ -20,6 +20,8 @@ interface OwnerAuthViewProps {
   onAuthenticateOwner: () => void;
   onSwitchToStaff: () => void;
   onApproveStockRequest: (reqId: string, approve: boolean) => void;
+  onDeleteApprovalRequest: (reqId: string) => void;
+  onClearAllApprovals: () => void;
   onNotify: (msg: string, icon?: string) => void;
 }
 
@@ -42,6 +44,8 @@ export function OwnerAuthView({
   onAuthenticateOwner,
   onSwitchToStaff,
   onApproveStockRequest,
+  onDeleteApprovalRequest,
+  onClearAllApprovals,
   onNotify,
 }: OwnerAuthViewProps) {
   // Always open on the Owner tab so tapping "เข้าเจ้าของร้าน" shows the PIN keypad immediately
@@ -598,13 +602,27 @@ export function OwnerAuthView({
 
                 {/* Pending Stock Approvals from Staff */}
                 <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-[13px] font-semibold text-on-surface">
                       คำขออนุมัติปรับสต็อกจากพนักงาน
                     </span>
-                    <span className="px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-semibold tabular-nums">
-                      {pendingApprovals.length} รออนุมัติ
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-semibold tabular-nums">
+                        {pendingApprovals.length} รออนุมัติ
+                      </span>
+                      {approvalRequests.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={onClearAllApprovals}
+                          className="px-2 py-0.5 rounded-md bg-error-container/60 hover:bg-error text-error hover:text-on-error text-[11px] font-semibold flex items-center gap-0.5 transition-colors cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">
+                            delete_sweep
+                          </span>
+                          <span>ลบคำขอทั้งหมด</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {pendingApprovals.length === 0 ? (
@@ -631,9 +649,22 @@ export function OwnerAuthView({
                               </span>
                             </p>
                           </div>
-                          <span className="text-[12px] font-semibold text-primary tabular-nums shrink-0">
-                            {req.currentStock} → {req.requestedStock} ชิ้น
-                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[12px] font-semibold text-primary tabular-nums">
+                              {req.currentStock} → {req.requestedStock} ชิ้น
+                            </span>
+                            <button
+                              type="button"
+                              aria-label="ลบคำขอนี้"
+                              title="ลบคำขอนี้"
+                              onClick={() => onDeleteApprovalRequest(req.id)}
+                              className="w-7 h-7 rounded-md bg-error-container/50 hover:bg-error text-error hover:text-on-error flex items-center justify-center transition-colors cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">
+                                delete
+                              </span>
+                            </button>
+                          </div>
                         </div>
                         <p className="text-[12px] text-on-surface-variant">
                           เหตุผล: {req.reason}

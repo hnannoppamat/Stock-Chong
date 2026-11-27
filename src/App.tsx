@@ -3,6 +3,7 @@ import { AiChatWidget } from "./components/AiChatWidget";
 import { AiScannerView } from "./components/AiScannerView";
 import { BottomNav } from "./components/BottomNav";
 import { CustomersView } from "./components/CustomersView";
+import { DashboardView } from "./components/DashboardView";
 import { Header } from "./components/Header";
 import { InventoryView } from "./components/InventoryView";
 import {
@@ -161,7 +162,10 @@ function makeId(prefix: string): string {
 export default function App() {
   const [initialStore] = useState<PersistedStore>(() => loadInitialStore());
 
-  const [activeTab, setActiveTab] = useState<TabId>("inventory");
+  const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+  const [inventoryInitialFilter, setInventoryInitialFilter] = useState<
+    "all" | "low" | undefined
+  >(undefined);
   // Open directly in Staff mode without any login screen; Owner mode unlocks via 4-digit PIN
   const [role, setRole] = useState<RoleMode>("staff");
   const [ownerName, setOwnerName] = useState<string>(initialStore.ownerName);
@@ -276,7 +280,7 @@ export default function App() {
   // Bill scanner and weekly sales chart are restricted to Owner mode only
   useEffect(() => {
     if (role === "staff" && activeTab === "ai-scanner") {
-      setActiveTab("inventory");
+      setActiveTab("dashboard");
     }
     if (role === "staff" && activeOrderTab === "weekly_chart") {
       setActiveOrderTab("pending");
@@ -410,10 +414,15 @@ export default function App() {
 
   const handleTabChange = (nextTab: TabId) => {
     if (nextTab === "ai-scanner" && role !== "owner") {
-      setActiveTab("inventory");
+      setActiveTab("dashboard");
       return;
     }
     setActiveTab(nextTab);
+  };
+
+  const handleNavigateInventory = (filter?: "all" | "low") => {
+    setInventoryInitialFilter(filter || "all");
+    setActiveTab("inventory");
   };
 
   const handleRoleChange = (
@@ -423,7 +432,7 @@ export default function App() {
   ) => {
     setRole(nextRole);
     if (nextRole === "staff" && activeTab === "ai-scanner") {
-      setActiveTab("inventory");
+      setActiveTab("dashboard");
     }
     showToast(toastMsg, icon);
   };
@@ -435,6 +444,43 @@ export default function App() {
   ) => {
     let importedUnits = 0;
 
+    // Auto-register any new AI-assigned categories into the store's category list
+    const incomingCategories = Array.from(
+      new Set(
+        items
+          .map((i) => i.category?.trim())
+          .filter((c): c is string => Boolean(c))
+      )
+    );
+    const newlyAddedCategories = incomingCategories.filter(
+      (c) => !categories.includes(c)
+    );
+    if (newlyAddedCategories.length > 0) {
+      setCategories((prev) => [
+        ...prev,
+        ...newlyAddedCategories.filter((c) => !prev.includes(c)),
+      ]);
+    }
+
+    const COLOR_HEX_MAP: Record<string, string> = {
+      ดำ: "#18181b",
+      ขาว: "#f8fafc",
+      ครีม: "#fef3c7",
+      ขาวครีม: "#fef3c7",
+      เบจ: "#d6c3a5",
+      น้ำตาล: "#78350f",
+      ชมพู: "#f472b6",
+      แดง: "#dc2626",
+      ฟ้า: "#60a5fa",
+      ฟ้าพาสเทล: "#60a5fa",
+      น้ำเงิน: "#2563eb",
+      เขียว: "#22c55e",
+      เขียวอ่อน: "#4ade80",
+      เทา: "#9ca3af",
+      ม่วง: "#a855f7",
+      เหลือง: "#facc15",
+    };
+
     setProducts((prev) => {
       const next = [...prev];
       items.forEach((scanned) => {
@@ -442,13 +488,17 @@ export default function App() {
         const landedCost = Number(
           (scanned.unitPriceCny * rate + freightPerUnit).toFixed(2)
         );
+        const matchKey = (scanned.matchedExistingSku || scanned.sku).toLowerCase();
         const existingIdx = next.findIndex(
-          (p) => p.sku.toLowerCase() === scanned.sku.toLowerCase()
+          (p) =>
+            p.sku.toLowerCase() === matchKey ||
+            p.sku.toLowerCase() === scanned.sku.toLowerCase()
         );
         if (existingIdx >= 0) {
           const existing = next[existingIdx];
           next[existingIdx] = {
             ...existing,
+            category: scanned.category || existing.category,
             stock: existing.stock + scanned.quantity,
             landedCostThb: landedCost,
             cnyUnitPrice: scanned.unitPriceCny,
@@ -457,6 +507,35 @@ export default function App() {
             updatedAt: "เมื่อสักครู่",
           };
         } else {
+          const defaultSellPrice = Math.max(
+            Math.ceil((landedCost * 1.9) / 10) * 10 - 1,
+            Math.ceil(landedCost + 30)
+          );
+          const sellPriceThb =
+            typeof scanned.suggestedSellPriceThb === "number" &&
+            scanned.suggestedSellPriceThb > landedCost
+              ? Math.round(scanned.suggestedSellPriceThb)
+              : defaultSellPrice;
+
+          const parsedColors =
+            scanned.colorVariants && scanned.colorVariants.length > 0
+              ? scanned.colorVariants.map((colorName, idx) => {
+                  const basePerColor = Math.floor(
+                    scanned.quantity / scanned.colorVariants!.length
+                  );
+                  const remainder =
+                    idx === 0
+                      ? scanned.quantity -
+                        basePerColor * scanned.colorVariants!.length
+                      : 0;
+                  return {
+                    name: colorName,
+                    hex: COLOR_HEX_MAP[colorName] || "#94a3b8",
+                    stock: basePerColor + remainder,
+                  };
+                })
+              : undefined;
+
           next.unshift({
             id: makeId("prod"),
             name: scanned.thaiName,
@@ -469,8 +548,9 @@ export default function App() {
             landedCostThb: landedCost,
             cnyUnitPrice: scanned.unitPriceCny,
             freightPerUnitThb: Number(freightPerUnit.toFixed(2)),
-            sellPriceThb: Math.ceil((landedCost * 1.9) / 10) * 10 - 1,
+            sellPriceThb,
             imageUrl: scanned.imageUrl,
+            ...(parsedColors ? { colors: parsedColors } : {}),
             updatedAt: "เมื่อสักครู่",
           });
         }
@@ -478,15 +558,16 @@ export default function App() {
       return next;
     });
 
+    const catCount = incomingCategories.length;
     showToast(
       role === "owner"
-        ? `นำเข้าสต็อก ${importedUnits} ชิ้น และอัปเดตต้นทุนเรียบร้อยแล้ว`
+        ? `นำเข้าสต็อก ${importedUnits} ชิ้น (${catCount} หมวดหมู่) และอัปเดตต้นทุนเรียบร้อยแล้ว`
         : `นำเข้าสต็อก ${importedUnits} ชิ้นเรียบร้อยแล้ว`,
       "inventory_2"
     );
     pushNotification(
-      "นำเข้าสินค้าจากบิลสำเร็จ",
-      `นำเข้า ${items.length} รายการ (${importedUnits} ชิ้น) จาก ${invoice.code}`,
+      "นำเข้าสินค้าจากบิล AI สำเร็จ",
+      `นำเข้า ${items.length} รายการ (${importedUnits} ชิ้น · ${catCount} หมวด) จาก ${invoice.code}`,
       "stock"
     );
   };
@@ -1025,12 +1106,74 @@ export default function App() {
   };
 
   const handleDeleteCustomer = (customerId: string) => {
+    if (role !== "owner") return;
     const target = customers.find((c) => c.id === customerId);
     setCustomers((prev) => prev.filter((c) => c.id !== customerId));
     showToast(
       `ลบลูกค้า "${target?.name || ""}" ออกจากรายชื่อแล้ว`,
       "person_remove"
     );
+  };
+
+  const handleDeleteProduct = (productId: string) => {
+    if (role !== "owner") return;
+    const target = products.find((p) => p.id === productId);
+    setProducts((prev) => prev.filter((p) => p.id !== productId));
+    setApprovals((prev) => prev.filter((a) => a.productId !== productId));
+    setEditingProduct((prev) => (prev?.id === productId ? null : prev));
+    setPreselectedOrderProduct((prev) => (prev?.id === productId ? null : prev));
+    showToast(
+      `ลบสินค้า "${target?.name || ""}" ออกจากคลังแล้ว`,
+      "delete"
+    );
+  };
+
+  const handleDeleteCategory = (categoryName: string) => {
+    if (role !== "owner") return;
+    if (categories.length <= 1) return;
+    const remaining = categories.filter((c) => c !== categoryName);
+    setCategories(remaining);
+    const fallbackCategory = remaining[0];
+    if (fallbackCategory) {
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.category === categoryName ? { ...p, category: fallbackCategory } : p
+        )
+      );
+    }
+    showToast(`ลบหมวดหมู่ "${categoryName}" แล้ว`, "delete");
+  };
+
+  const handleDeleteOrder = (orderId: string) => {
+    if (role !== "owner") return;
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    setPrintingOrder((prev) => (prev?.id === orderId ? null : prev));
+    setConfirmingDeliveryOrder((prev) => (prev?.id === orderId ? null : prev));
+    showToast(`ลบออเดอร์ #${orderId} เรียบร้อยแล้ว`, "delete");
+  };
+
+  const handleDeleteNotification = (notiId: string) => {
+    if (role !== "owner") return;
+    setNotifications((prev) => prev.filter((n) => n.id !== notiId));
+    showToast("ลบการแจ้งเตือนแล้ว", "delete");
+  };
+
+  const handleClearAllNotifications = () => {
+    if (role !== "owner") return;
+    setNotifications([]);
+    showToast("ลบการแจ้งเตือนทั้งหมดแล้ว", "delete_sweep");
+  };
+
+  const handleDeleteApprovalRequest = (reqId: string) => {
+    if (role !== "owner") return;
+    setApprovals((prev) => prev.filter((a) => a.id !== reqId));
+    showToast(`ลบคำขออนุมัติ #${reqId} แล้ว`, "delete");
+  };
+
+  const handleClearAllApprovals = () => {
+    if (role !== "owner") return;
+    setApprovals([]);
+    showToast("ลบคำขออนุมัติทั้งหมดแล้ว", "delete_sweep");
   };
 
   const handleImportOrderCustomers = (names: string[]) => {
@@ -1083,6 +1226,8 @@ export default function App() {
           else if (noti.type === "stock") setActiveTab("inventory");
           else if (noti.type === "approval") setActiveTab("owner-auth");
         }}
+        onDeleteNotification={handleDeleteNotification}
+        onClearAllNotifications={handleClearAllNotifications}
       />
 
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 md:px-6 pt-18 md:pt-20 pb-24 md:pb-10">
@@ -1090,6 +1235,9 @@ export default function App() {
           <AiScannerView
             role={role}
             invoice={invoice}
+            categories={categories}
+            existingProducts={products}
+            onAddCategory={handleAddCategory}
             onUpdateInvoice={setInvoice}
             exchangeRate={exchangeRate}
             onExchangeRateChange={setExchangeRate}
@@ -1118,13 +1266,46 @@ export default function App() {
           />
         )}
 
-        {activeTab === "inventory" && (
-          <InventoryView
+        {activeTab === "dashboard" && (
+          <DashboardView
             role={role}
             products={products}
             orders={orders}
             categories={categories}
             ownerLineId={ownerLineId}
+            lastSyncedLabel={lastSyncedLabel}
+            onSyncNow={() => {
+              stampSynced();
+              showToast("บันทึกข้อมูลสต็อกลงเครื่องเรียบร้อยแล้ว", "save");
+            }}
+            onQuickCreateOrder={handleQuickCreateOrder}
+            onQuickCreateOrderForProduct={handleQuickCreateOrderForProduct}
+            onNavigateInventory={handleNavigateInventory}
+            onNavigateOrdersWithTab={(tab) => {
+              setActiveOrderTab(tab);
+              setActiveTab("orders");
+            }}
+            onNavigateScanner={() => setActiveTab("ai-scanner")}
+            onOpenAddProduct={() => setShowAddProductModal(true)}
+            onSelectProductForEdit={(prod) => setEditingProduct(prod)}
+            onConfirmPack={handleConfirmPack}
+            onMarkReadyToShip={handleMarkReadyToShip}
+            onNotifyLowStockLine={(items) =>
+              openLowStockLineAlert(items, "รายการสินค้าใกล้หมด/ต้องสั่งเติม")
+            }
+            onDeleteOrder={handleDeleteOrder}
+            onDeleteProduct={handleDeleteProduct}
+          />
+        )}
+
+        {activeTab === "inventory" && (
+          <InventoryView
+            role={role}
+            products={products}
+            categories={categories}
+            ownerLineId={ownerLineId}
+            initialStockFilter={inventoryInitialFilter}
+            onConsumeInitialFilter={() => setInventoryInitialFilter(undefined)}
             onNotifyLowStockLine={(items) =>
               openLowStockLineAlert(items, "รายการสินค้าใกล้หมด/ต้องสั่งเติม")
             }
@@ -1133,17 +1314,13 @@ export default function App() {
               stampSynced();
               showToast("บันทึกข้อมูลสต็อกลงเครื่องเรียบร้อยแล้ว", "save");
             }}
-            onQuickCreateOrder={handleQuickCreateOrder}
             onQuickCreateOrderForProduct={handleQuickCreateOrderForProduct}
-            onNavigateOrdersWithTab={(tab) => {
-              setActiveOrderTab(tab);
-              setActiveTab("orders");
-            }}
-            onConfirmPack={handleConfirmPack}
-            onMarkReadyToShip={handleMarkReadyToShip}
             onNavigateScanner={() => setActiveTab("ai-scanner")}
             onOpenAddProduct={() => setShowAddProductModal(true)}
+            onAddCategory={handleAddCategory}
             onSelectProduct={(prod) => setEditingProduct(prod)}
+            onDeleteProduct={handleDeleteProduct}
+            onDeleteCategory={handleDeleteCategory}
           />
         )}
 
@@ -1164,11 +1341,13 @@ export default function App() {
             onConfirmShip={handleConfirmShip}
             onOpenPrintLabel={(order) => setPrintingOrder(order)}
             onOpenDeliveryConfirm={(order) => setConfirmingDeliveryOrder(order)}
+            onDeleteOrder={handleDeleteOrder}
           />
         )}
 
         {activeTab === "customers" && (
           <CustomersView
+            role={role}
             customers={customers}
             orders={orders}
             onCreateCustomer={handleCreateCustomer}
@@ -1226,6 +1405,8 @@ export default function App() {
               handleRoleChange("staff", "เข้าสู่โหมดพนักงานแล้ว", "badge")
             }
             onApproveStockRequest={handleApproveStockRequest}
+            onDeleteApprovalRequest={handleDeleteApprovalRequest}
+            onClearAllApprovals={handleClearAllApprovals}
             onNotify={showToast}
           />
         )}
@@ -1284,6 +1465,7 @@ export default function App() {
           onUpdateOwner={handleUpdateProductOwner}
           onUpdateProductDetails={handleUpdateProductDetails}
           onRequestStockChange={handleRequestStockChange}
+          onDeleteProduct={handleDeleteProduct}
           onSwitchToOwnerAuth={() => setActiveTab("owner-auth")}
         />
       )}

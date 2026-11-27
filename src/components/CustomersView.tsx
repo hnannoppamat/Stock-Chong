@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Customer, Order, OrderStatus } from "../types";
+import { Customer, Order, OrderStatus, RoleMode } from "../types";
 import { LIMITS } from "../services/firestoreService";
 
 interface CustomersViewProps {
+  role: RoleMode;
   customers: Customer[];
   orders: Order[];
   onCreateCustomer: (
@@ -238,6 +239,7 @@ function CustomerFormModal({
 }
 
 export function CustomersView({
+  role,
   customers,
   orders,
   onCreateCustomer,
@@ -630,38 +632,41 @@ export function CustomersView({
                       </span>
                       <span>แก้ไข</span>
                     </button>
-                    {confirmDeleteId === activeCustomer.id ? (
-                      <div className="flex items-center gap-1">
+                    {role === "owner" && (
+                      confirmDeleteId === activeCustomer.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDeleteCustomer(activeCustomer.id);
+                              setConfirmDeleteId(null);
+                              setSelectedId(null);
+                            }}
+                            className="h-9 px-3 rounded-xl bg-error text-on-error text-[12px] font-semibold cursor-pointer"
+                          >
+                            ยืนยันลบ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="h-9 px-2.5 rounded-xl bg-surface-container text-on-surface-variant text-[12px] font-medium cursor-pointer"
+                          >
+                            ยกเลิก
+                          </button>
+                        </div>
+                      ) : (
                         <button
                           type="button"
-                          onClick={() => {
-                            onDeleteCustomer(activeCustomer.id);
-                            setConfirmDeleteId(null);
-                            setSelectedId(null);
-                          }}
-                          className="h-9 px-3 rounded-xl bg-error text-on-error text-[12px] font-semibold cursor-pointer"
+                          aria-label="ลบข้อมูลลูกค้า"
+                          onClick={() => setConfirmDeleteId(activeCustomer.id)}
+                          className="h-9 px-3 rounded-xl bg-error-container/60 hover:bg-error text-error hover:text-on-error text-[12px] font-semibold flex items-center gap-1 cursor-pointer transition-colors"
                         >
-                          ยืนยันลบ
+                          <span className="material-symbols-outlined text-[17px]">
+                            delete
+                          </span>
+                          <span>ลบลูกค้า</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(null)}
-                          className="h-9 px-2.5 rounded-xl bg-surface-container text-on-surface-variant text-[12px] font-medium cursor-pointer"
-                        >
-                          ยกเลิก
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        aria-label="ลบข้อมูลลูกค้า"
-                        onClick={() => setConfirmDeleteId(activeCustomer.id)}
-                        className="w-9 h-9 rounded-xl bg-surface-container hover:bg-error-container text-on-surface-variant hover:text-error flex items-center justify-center cursor-pointer transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">
-                          delete
-                        </span>
-                      </button>
+                      )
                     )}
                   </div>
                 </div>

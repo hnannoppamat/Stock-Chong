@@ -1,12 +1,21 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { SAMPLE_ALTERNATE_INVOICES } from "../data/initialData";
-import { RoleMode, ScannedBillItem, ScannedInvoice } from "../types";
+import {
+  BillAiAnalysis,
+  ProductItem,
+  RoleMode,
+  ScannedBillItem,
+  ScannedInvoice,
+} from "../types";
 import { readImageAsDataUrl } from "../utils/image";
 import { ResilientImage } from "./ResilientImage";
 
 interface AiScannerViewProps {
   role: RoleMode;
   invoice: ScannedInvoice;
+  categories: string[];
+  existingProducts: ProductItem[];
+  onAddCategory: (categoryName: string) => void;
   onUpdateInvoice: (invoice: ScannedInvoice) => void;
   exchangeRate: number;
   onExchangeRateChange: (rate: number) => void;
@@ -32,9 +41,45 @@ interface AiScannerViewProps {
   onNotify: (msg: string, icon?: string) => void;
 }
 
+interface RawAiScannedItem {
+  chineseName?: string;
+  thaiName?: string;
+  sku?: string;
+  category?: string;
+  isNewCategory?: boolean;
+  matchedExistingSku?: string;
+  productType?: string;
+  material?: string;
+  colorVariants?: unknown;
+  sizeSpec?: string;
+  quantity?: number;
+  unitPriceCny?: number;
+  suggestedSellPriceThb?: number;
+  aiReason?: string;
+  confidence?: number;
+}
+
+interface RawAiScanResponse {
+  invoiceTitle?: string;
+  invoiceCode?: string;
+  confidence?: number;
+  aiAnalysis?: {
+    summary?: string;
+    supplierType?: string;
+    currencyDetected?: string;
+    keyHighlights?: unknown;
+    suggestedNewCategories?: unknown;
+  };
+  items?: RawAiScannedItem[];
+  error?: string;
+}
+
 export function AiScannerView({
   role,
   invoice,
+  categories,
+  existingProducts,
+  onAddCategory,
   onUpdateInvoice,
   exchangeRate,
   onExchangeRateChange,
@@ -63,19 +108,266 @@ export function AiScannerView({
     null
   );
   const [isScanning, setIsScanning] = useState(false);
+  const [scanStatusText, setScanStatusText] = useState<string>(
+    "AI กำลังวิเคราะห์บิล แยกแยะสินค้า และจัดหมวดหมู่..."
+  );
   const [scanError, setScanError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [sampleIndex, setSampleIndex] = useState(0);
+  const [confirmClearBill, setConfirmClearBill] = useState(false);
+
+  // Category grouping & filtering controls
+  const [viewMode, setViewMode] = useState<"grouped" | "list">("grouped");
+  const [selectedCategoryFilter, setSelectedCategoryFilter] =
+    useState<string>("ทั้งหมด");
+
+  // Text-bill paste analyzer drawer
+  const [showTextBillInput, setShowTextBillInput] = useState(false);
+  const [billTextInput, setBillTextInput] = useState("");
+
+  const existingSkuSet = useMemo(
+    () => new Set(existingProducts.map((p) => p.sku.toLowerCase())),
+    [existingProducts]
+  );
+
+  const existingProductsPayload = useMemo(
+    () =>
+      existingProducts.slice(0, 60).map((p) => ({
+        sku: p.sku,
+        name: p.name,
+        category: p.category,
+        stock: p.stock,
+      })),
+    [existingProducts]
+  );
 
   const totalQty = invoice.items.reduce((sum, item) => sum + item.quantity, 0);
+  const totalBillCny = invoice.items.reduce(
+    (sum, item) => sum + item.quantity * item.unitPriceCny,
+    0
+  );
   const freightPerUnit =
     splitByQty && totalQty > 0 ? freightCost / totalQty : 0;
+
+  // Dynamic category breakdown derived from current invoice items
+  const categoryBreakdown = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        category: string;
+        itemCount: number;
+        totalQty: number;
+        totalCny: number;
+        isNewCategory: boolean;
+      }
+    >();
+    invoice.items.forEach((item) => {
+      const cat = item.category?.trim() || "ไม่ระบุหมวดหมู่";
+      const existing = map.get(cat) ?? {
+        category: cat,
+        itemCount: 0,
+        totalQty: 0,
+        totalCny: 0,
+        isNewCategory: !categories.includes(cat),
+      };
+      existing.itemCount += 1;
+      existing.totalQty += item.quantity;
+      existing.totalCny += item.quantity * item.unitPriceCny;
+      map.set(cat, existing);
+    });
+    return Array.from(map.values()).sort((a, b) => b.totalQty - a.totalQty);
+  }, [invoice.items, categories]);
+
+  const unaddedNewCategories = useMemo(
+    () =>
+      categoryBreakdown
+        .filter((c) => !categories.includes(c.category))
+        .map((c) => c.category),
+    [categoryBreakdown, categories]
+  );
+
+  const filteredItems = useMemo(() => {
+    if (selectedCategoryFilter === "ทั้งหมด") return invoice.items;
+    return invoice.items.filter(
+      (i) => (i.category?.trim() || "ไม่ระบุหมวดหมู่") === selectedCategoryFilter
+    );
+  }, [invoice.items, selectedCategoryFilter]);
+
+  const groupedItems = useMemo(() => {
+    const groups = new Map<string, ScannedBillItem[]>();
+    filteredItems.forEach((item) => {
+      const cat = item.category?.trim() || "ไม่ระบุหมวดหมู่";
+      const list = groups.get(cat) ?? [];
+      list.push(item);
+      groups.set(cat, list);
+    });
+    return Array.from(groups.entries());
+  }, [filteredItems]);
+
+  const restockCount = useMemo(
+    () =>
+      invoice.items.filter(
+        (i) =>
+          Boolean(i.matchedExistingSku) ||
+          existingSkuSet.has(i.sku.toLowerCase())
+      ).length,
+    [invoice.items, existingSkuSet]
+  );
+
+  const newProductCount = Math.max(0, invoice.items.length - restockCount);
+
+  const mapAiResponseToInvoice = (
+    result: RawAiScanResponse,
+    fallbackImageUrl: string,
+    preserveImagesFrom?: ScannedBillItem[]
+  ): ScannedInvoice => {
+    const mappedItems: ScannedBillItem[] = Array.isArray(result.items)
+      ? result.items.map((item, idx) => {
+          const cleanSku = item.sku?.trim() || `SKU-AI-${100 + idx}`;
+          const matchedPrev = preserveImagesFrom?.find(
+            (prev, pIdx) =>
+              prev.sku.toLowerCase() === cleanSku.toLowerCase() || pIdx === idx
+          );
+          const cleanCat =
+            item.category?.trim() || categories[0] || "กระเป๋าสะพายข้าง";
+          const colorVariants = Array.isArray(item.colorVariants)
+            ? item.colorVariants
+                .filter((c): c is string => typeof c === "string" && c.trim().length > 0)
+                .map((c) => c.trim())
+                .slice(0, 8)
+            : undefined;
+
+          const matchedSku =
+            typeof item.matchedExistingSku === "string" &&
+            item.matchedExistingSku.trim()
+              ? item.matchedExistingSku.trim()
+              : existingSkuSet.has(cleanSku.toLowerCase())
+                ? cleanSku
+                : undefined;
+
+          return {
+            id: `ai-${Date.now()}-${idx}`,
+            chineseName: item.chineseName?.trim() || "สินค้าจากบิล",
+            thaiName:
+              item.thaiName?.trim() || item.chineseName?.trim() || "สินค้าใหม่",
+            sku: cleanSku,
+            category: cleanCat,
+            quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
+            unitPriceCny: Math.max(0, Number(item.unitPriceCny) || 0),
+            imageUrl: matchedPrev?.imageUrl,
+            productType: item.productType?.trim() || undefined,
+            material:
+              item.material?.trim() && item.material.trim() !== "-"
+                ? item.material.trim()
+                : undefined,
+            colorVariants:
+              colorVariants && colorVariants.length > 0
+                ? colorVariants
+                : undefined,
+            sizeSpec: item.sizeSpec?.trim() || undefined,
+            suggestedSellPriceThb:
+              typeof item.suggestedSellPriceThb === "number" &&
+              item.suggestedSellPriceThb > 0
+                ? Math.round(item.suggestedSellPriceThb)
+                : undefined,
+            aiReason: item.aiReason?.trim() || undefined,
+            isNewCategory:
+              Boolean(item.isNewCategory) || !categories.includes(cleanCat),
+            matchedExistingSku: matchedSku,
+            confidence:
+              typeof item.confidence === "number"
+                ? Math.min(100, Math.max(0, Math.round(item.confidence)))
+                : undefined,
+          };
+        })
+      : [];
+
+    const aiAnalysis: BillAiAnalysis | undefined = result.aiAnalysis
+      ? {
+          summary:
+            result.aiAnalysis.summary?.trim() ||
+            `AI วิเคราะห์และแยกสินค้าได้ ${mappedItems.length} รายการ`,
+          supplierType: result.aiAnalysis.supplierType?.trim() || undefined,
+          currencyDetected:
+            result.aiAnalysis.currencyDetected?.trim() || "CNY (หยวน)",
+          keyHighlights: Array.isArray(result.aiAnalysis.keyHighlights)
+            ? result.aiAnalysis.keyHighlights
+                .filter(
+                  (h): h is string =>
+                    typeof h === "string" && h.trim().length > 0
+                )
+                .map((h) => h.trim())
+                .slice(0, 5)
+            : [],
+          suggestedNewCategories: Array.isArray(
+            result.aiAnalysis.suggestedNewCategories
+          )
+            ? result.aiAnalysis.suggestedNewCategories
+                .filter(
+                  (c): c is string =>
+                    typeof c === "string" && c.trim().length > 0
+                )
+                .map((c) => c.trim())
+            : [],
+          analyzedAt: new Date().toLocaleTimeString("th-TH", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        }
+      : undefined;
+
+    return {
+      title: result.invoiceTitle?.trim() || "ใบเสร็จรับสินค้า",
+      code:
+        result.invoiceCode?.trim() ||
+        `OCR #CN-${Math.floor(1000 + Math.random() * 9000)}`,
+      confidence: Math.min(100, Math.max(1, Number(result.confidence) || 95)),
+      imageUrl: fallbackImageUrl,
+      items: mappedItems,
+      aiAnalysis,
+    };
+  };
+
+  const handleDeleteScannedItem = (itemId: string) => {
+    const target = invoice.items.find((i) => i.id === itemId);
+    onUpdateInvoice({
+      ...invoice,
+      items: invoice.items.filter((i) => i.id !== itemId),
+    });
+    onNotify(`ลบรายการ "${target?.thaiName || ""}" ออกจากบิลแล้ว`, "delete");
+  };
+
+  const handleClearAllScannedItems = () => {
+    onUpdateInvoice({
+      ...invoice,
+      items: [],
+      aiAnalysis: undefined,
+    });
+    setSelectedCategoryFilter("ทั้งหมด");
+    setConfirmClearBill(false);
+    onNotify("ล้างรายการสินค้าในบิลสแกนทั้งหมดแล้ว", "delete_sweep");
+  };
+
+  const handleChangeItemCategory = (itemId: string, nextCategory: string) => {
+    const updated = invoice.items.map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            category: nextCategory,
+            isNewCategory: !categories.includes(nextCategory),
+          }
+        : item
+    );
+    onUpdateInvoice({ ...invoice, items: updated });
+    onNotify(`เปลี่ยนหมวดหมู่เป็น "${nextCategory}" แล้ว`, "category");
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setScanError(null);
+    setScanStatusText("AI กำลังอ่านรูปบิล แยกแยะสินค้า และจัดหมวดหมู่อัตโนมัติ...");
     setIsScanning(true);
 
     try {
@@ -92,50 +384,31 @@ export function AiScannerView({
         body: JSON.stringify({
           imageBase64: dataUrl,
           mimeType: file.type || "image/jpeg",
+          categories,
+          existingProducts: existingProductsPayload,
+          exchangeRate,
+          freightCost,
         }),
       });
 
-      const result = await response.json();
+      const result = (await response.json()) as RawAiScanResponse;
       if (!response.ok) {
         throw new Error(result.error || "ไม่สามารถสแกนบิลด้วย AI ได้");
       }
 
-      const mappedItems: ScannedBillItem[] = Array.isArray(result.items)
-        ? result.items.map(
-            (
-              item: {
-                chineseName?: string;
-                thaiName?: string;
-                sku?: string;
-                category?: string;
-                quantity?: number;
-                unitPriceCny?: number;
-              },
-              idx: number
-            ) => ({
-              id: `ai-${Date.now()}-${idx}`,
-              chineseName: item.chineseName || "สินค้าจากบิล",
-              thaiName: item.thaiName || item.chineseName || "สินค้าใหม่",
-              sku: item.sku || `SKU-AI-${100 + idx}`,
-              category: item.category || "กระเป๋าสะพายข้าง",
-              quantity: Math.max(1, Number(item.quantity) || 1),
-              unitPriceCny: Math.max(0, Number(item.unitPriceCny) || 0),
-            })
-          )
-        : [];
-
-      if (mappedItems.length === 0) {
+      const nextInvoice = mapAiResponseToInvoice(result, dataUrl);
+      if (nextInvoice.items.length === 0) {
         throw new Error("ไม่พบรายการสินค้าในบิลนี้ กรุณาลองภาพที่ชัดเจนขึ้น");
       }
 
-      onUpdateInvoice({
-        title: result.invoiceTitle || "ใบเสร็จรับสินค้าจีน",
-        code: result.invoiceCode || `OCR #CN-${Math.floor(1000 + Math.random() * 9000)}`,
-        confidence: Number(result.confidence) || 95,
-        imageUrl: dataUrl,
-        items: mappedItems,
-      });
-      onNotify(`AI สแกนบิลสำเร็จ (${mappedItems.length} รายการ)`, "document_scanner");
+      setSelectedCategoryFilter("ทั้งหมด");
+      setViewMode("grouped");
+      onUpdateInvoice(nextInvoice);
+      const uniqueCats = new Set(nextInvoice.items.map((i) => i.category)).size;
+      onNotify(
+        `AI วิเคราะห์บิลสำเร็จ แยกได้ ${nextInvoice.items.length} สินค้า (${uniqueCats} หมวดหมู่)`,
+        "auto_awesome"
+      );
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการสแกนบิล";
@@ -152,19 +425,101 @@ export function AiScannerView({
     }
   };
 
+  const handleAnalyzeWithAi = async (mode: "reanalyze" | "text") => {
+    if (mode === "text" && !billTextInput.trim()) {
+      onNotify("กรุณาวางข้อความบิลหรือรายการสินค้าก่อนวิเคราะห์", "info");
+      return;
+    }
+    if (mode === "reanalyze" && invoice.items.length === 0) {
+      onNotify("ไม่มีรายการสินค้าให้ AI วิเคราะห์", "info");
+      return;
+    }
+
+    setScanError(null);
+    setScanStatusText(
+      mode === "text"
+        ? "AI กำลังแยกสินค้าจากข้อความบิลและจัดหมวดหมู่อัตโนมัติ..."
+        : "AI กำลังวิเคราะห์รายละเอียดสินค้าและจัดหมวดหมู่ใหม่..."
+    );
+    setIsScanning(true);
+
+    try {
+      const response = await fetch("/api/analyze-bill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          mode === "text"
+            ? {
+                billText: billTextInput.trim(),
+                categories,
+                existingProducts: existingProductsPayload,
+                exchangeRate,
+                freightCost,
+              }
+            : {
+                items: invoice.items,
+                invoiceTitle: invoice.title,
+                invoiceCode: invoice.code,
+                categories,
+                existingProducts: existingProductsPayload,
+                exchangeRate,
+                freightCost,
+              }
+        ),
+      });
+
+      const result = (await response.json()) as RawAiScanResponse;
+      if (!response.ok) {
+        throw new Error(result.error || "ไม่สามารถวิเคราะห์บิลด้วย AI ได้");
+      }
+
+      const nextInvoice = mapAiResponseToInvoice(
+        result,
+        invoice.imageUrl,
+        mode === "reanalyze" ? invoice.items : undefined
+      );
+
+      if (nextInvoice.items.length === 0) {
+        throw new Error("AI ไม่พบรายการสินค้าที่ชัดเจนในข้อมูลนี้");
+      }
+
+      setSelectedCategoryFilter("ทั้งหมด");
+      setViewMode("grouped");
+      onUpdateInvoice(nextInvoice);
+      if (mode === "text") {
+        setShowTextBillInput(false);
+        setBillTextInput("");
+      }
+      const uniqueCats = new Set(nextInvoice.items.map((i) => i.category)).size;
+      onNotify(
+        `AI วิเคราะห์และแยกหมวดหมู่สำเร็จ (${nextInvoice.items.length} สินค้า · ${uniqueCats} หมวด)`,
+        "auto_awesome"
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการวิเคราะห์บิล";
+      setScanError(message);
+      onNotify(message, "error");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handleCycleSampleScan = () => {
     setScanError(null);
+    setScanStatusText("กำลังโหลดบิลตัวอย่างและผลวิเคราะห์ AI...");
     setIsScanning(true);
     const nextIdx = (sampleIndex + 1) % SAMPLE_ALTERNATE_INVOICES.length;
     setTimeout(() => {
       setSampleIndex(nextIdx);
+      setSelectedCategoryFilter("ทั้งหมด");
       onUpdateInvoice(SAMPLE_ALTERNATE_INVOICES[nextIdx]);
       setIsScanning(false);
       onNotify(
-        `สแกนบิลตัวอย่าง ${SAMPLE_ALTERNATE_INVOICES[nextIdx].code} สำเร็จ`,
+        `โหลดบิลตัวอย่าง ${SAMPLE_ALTERNATE_INVOICES[nextIdx].code} พร้อมผลแยกหมวดหมู่แล้ว`,
         "document_scanner"
       );
-    }, 350);
+    }, 320);
   };
 
   const handleItemQtyDelta = (id: string, delta: number) => {
@@ -214,6 +569,268 @@ export function AiScannerView({
     onSaveToInventory(invoice.items, exchangeRate, freightPerUnit);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2200);
+  };
+
+  const renderItemCard = (item: ScannedBillItem) => {
+    const landedCost = item.unitPriceCny * exchangeRate + freightPerUnit;
+    const isExisting =
+      Boolean(item.matchedExistingSku) ||
+      existingSkuSet.has(item.sku.toLowerCase());
+    const isCatNew = !categories.includes(item.category);
+    const selectableCategories = isCatNew
+      ? [item.category, ...categories]
+      : categories;
+    const estMarginPct =
+      item.suggestedSellPriceThb && item.suggestedSellPriceThb > 0
+        ? Math.round(
+            ((item.suggestedSellPriceThb - landedCost) /
+              item.suggestedSellPriceThb) *
+              100
+          )
+        : null;
+
+    return (
+      <article
+        key={item.id}
+        className="w-full rounded-xl bg-surface-container-lowest p-4 shadow-sm border border-outline-variant/25 flex items-start gap-3"
+      >
+        <div className="flex flex-col items-center gap-1.5 shrink-0">
+          <ResilientImage
+            src={item.imageUrl}
+            alt={item.thaiName}
+            className="w-14 h-14 rounded-lg object-cover bg-surface-container shrink-0"
+          />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              title="ถ่ายรูปด้วยกล้อง"
+              onClick={() => handleTriggerItemImage(item.id, "camera")}
+              className="px-1.5 py-0.5 rounded-md bg-primary-fixed/80 hover:bg-primary-fixed text-on-primary-fixed text-[10px] font-semibold flex items-center gap-0.5 whitespace-nowrap cursor-pointer transition-colors"
+            >
+              <span className="material-symbols-outlined text-[12px]">
+                photo_camera
+              </span>
+              <span>กล้อง</span>
+            </button>
+            <button
+              type="button"
+              title="เลือกจากคลังรูปภาพ"
+              onClick={() => handleTriggerItemImage(item.id, "gallery")}
+              className="px-1.5 py-0.5 rounded-md bg-surface-container hover:bg-surface-container-high text-on-surface text-[10px] font-semibold flex items-center gap-0.5 whitespace-nowrap cursor-pointer transition-colors"
+            >
+              <span className="material-symbols-outlined text-[12px]">
+                photo_library
+              </span>
+              <span>คลัง</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-0 flex flex-col gap-2">
+          {/* Title + Match Badge + SKU + Delete */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                <span
+                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-semibold ${
+                    isExisting
+                      ? "bg-secondary-container text-on-secondary-container"
+                      : "bg-primary-fixed text-on-primary-fixed"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[12px]">
+                    {isExisting ? "inventory" : "new_releases"}
+                  </span>
+                  <span>
+                    {isExisting ? "สินค้าเดิมในคลัง (เติมสต็อก)" : "สินค้าใหม่"}
+                  </span>
+                </span>
+                {typeof item.confidence === "number" && (
+                  <span className="text-[10px] text-on-surface-variant tabular-nums">
+                    AI มั่นใจ {item.confidence}%
+                  </span>
+                )}
+              </div>
+              <h3 className="text-[14px] font-semibold text-on-surface leading-snug">
+                {item.thaiName}
+              </h3>
+              {item.chineseName && item.chineseName !== item.thaiName && (
+                <p className="text-[11px] text-on-surface-variant truncate">
+                  ต้นฉบับในบิล: {item.chineseName}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] font-medium text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-md tabular-nums">
+                {item.sku}
+              </span>
+              {role === "owner" && (
+                <button
+                  type="button"
+                  aria-label="ลบรายการนี้"
+                  onClick={() => handleDeleteScannedItem(item.id)}
+                  className="w-7 h-7 rounded-lg bg-error-container/50 hover:bg-error text-error hover:text-on-error flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    delete
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Interactive AI Category Assignment Row */}
+          <div className="flex items-center gap-2 flex-wrap bg-surface-container-low/80 rounded-lg px-2.5 py-1.5">
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-primary shrink-0">
+              <span className="material-symbols-outlined text-[15px]">
+                category
+              </span>
+              <span>หมวดหมู่:</span>
+            </div>
+            <select
+              aria-label={`หมวดหมู่ของ ${item.thaiName}`}
+              value={item.category}
+              onChange={(e) => handleChangeItemCategory(item.id, e.target.value)}
+              className="text-[12px] font-semibold text-on-surface bg-surface-container-lowest border border-outline-variant/50 rounded-md px-2 py-1 focus:outline-none focus:border-primary cursor-pointer"
+            >
+              {selectableCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                  {!categories.includes(cat) ? " (หมวดใหม่ที่ AI แนะนำ)" : ""}
+                </option>
+              ))}
+            </select>
+            {isCatNew && (
+              <button
+                type="button"
+                onClick={() => {
+                  onAddCategory(item.category);
+                }}
+                className="inline-flex items-center gap-0.5 px-2 py-1 rounded-md bg-primary text-on-primary text-[11px] font-semibold hover:bg-primary-dim transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[13px]">
+                  add
+                </span>
+                <span>เพิ่มหมวดนี้เข้าร้าน</span>
+              </button>
+            )}
+          </div>
+
+          {/* AI-Identified Product Attributes */}
+          {(item.productType ||
+            item.material ||
+            item.sizeSpec ||
+            (item.colorVariants && item.colorVariants.length > 0)) && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {item.productType && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-container text-on-surface text-[11px]">
+                  <span className="material-symbols-outlined text-[13px] text-primary">
+                    shopping_bag
+                  </span>
+                  <span>{item.productType}</span>
+                </span>
+              )}
+              {item.material && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-container text-on-surface text-[11px]">
+                  <span className="material-symbols-outlined text-[13px] text-secondary">
+                    texture
+                  </span>
+                  <span>วัสดุ: {item.material}</span>
+                </span>
+              )}
+              {item.sizeSpec && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-container text-on-surface text-[11px]">
+                  <span className="material-symbols-outlined text-[13px] text-on-surface-variant">
+                    straighten
+                  </span>
+                  <span>{item.sizeSpec}</span>
+                </span>
+              )}
+              {item.colorVariants && item.colorVariants.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-container text-on-surface text-[11px]">
+                  <span className="material-symbols-outlined text-[13px] text-primary">
+                    palette
+                  </span>
+                  <span>สี: {item.colorVariants.join(", ")}</span>
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* AI Classification Reason */}
+          {item.aiReason && (
+            <div className="flex items-start gap-1.5 text-[11px] text-on-surface-variant leading-snug">
+              <span className="material-symbols-outlined text-[14px] text-primary shrink-0 mt-0.5">
+                auto_awesome
+              </span>
+              <span>{item.aiReason}</span>
+            </div>
+          )}
+
+          {/* Qty Stepper & CNY Price */}
+          <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-medium">
+                <button
+                  type="button"
+                  aria-label="ลดจำนวน"
+                  onClick={() => handleItemQtyDelta(item.id, -1)}
+                  className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-white/40 cursor-pointer"
+                >
+                  -
+                </button>
+                <span className="tabular-nums px-1">
+                  จำนวน: {item.quantity} ชิ้น
+                </span>
+                <button
+                  type="button"
+                  aria-label="เพิ่มจำนวน"
+                  onClick={() => handleItemQtyDelta(item.id, 1)}
+                  className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-white/40 cursor-pointer"
+                >
+                  +
+                </button>
+              </div>
+              {role === "owner" && (
+                <span className="text-[12px] text-on-surface-variant tabular-nums">
+                  ราคาทุนบิล: ¥{item.unitPriceCny.toFixed(2)}/ชิ้น
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Owner Cost & AI Suggested Retail Price */}
+          {role === "owner" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-0.5">
+              <div className="flex items-center justify-between bg-surface-container-low/80 rounded-lg px-3 py-1.5">
+                <span className="text-[11px] text-on-surface-variant">
+                  ต้นทุนรวมค่าส่ง
+                </span>
+                <span className="text-[14px] font-semibold text-secondary tabular-nums">
+                  ฿{landedCost.toFixed(2)}/ชิ้น
+                </span>
+              </div>
+              {item.suggestedSellPriceThb && (
+                <div className="flex items-center justify-between bg-primary-fixed/40 rounded-lg px-3 py-1.5">
+                  <span className="text-[11px] text-on-primary-fixed">
+                    ราคาขายแนะนำ AI
+                  </span>
+                  <span className="text-[14px] font-semibold text-primary tabular-nums">
+                    ฿{item.suggestedSellPriceThb.toLocaleString()}
+                    {estMarginPct !== null && estMarginPct > 0 && (
+                      <span className="text-[10px] font-medium text-secondary ml-1">
+                        (กำไร ~{estMarginPct}%)
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </article>
+    );
   };
 
   return (
@@ -283,9 +900,9 @@ export function AiScannerView({
         </button>
       </div>
 
-      {/* Main 2-column responsive layout (mobile stacked, desktop 12-col split) */}
+      {/* Main 2-column responsive layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* Left Column: Camera Viewfinder + Exchange Rate & Freight */}
+        {/* Left Column: Camera Viewfinder + Text Bill Analyzer + AI Summary + Exchange Rate */}
         <div className="lg:col-span-5 flex flex-col gap-4">
           <section className="relative w-full rounded-xl bg-surface-container-lowest shadow-md overflow-hidden">
             <div className="relative w-full h-56 sm:h-64 bg-inverse-surface overflow-hidden">
@@ -297,15 +914,31 @@ export function AiScannerView({
               />
               <div className="absolute inset-0 bg-gradient-to-t from-inverse-surface via-inverse-surface/40 to-transparent" />
 
+              {/* Scanning Loading Overlay */}
+              {isScanning && (
+                <div className="absolute inset-0 z-20 bg-inverse-surface/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center gap-2.5">
+                  <div className="w-11 h-11 rounded-xl bg-primary text-on-primary flex items-center justify-center shadow-lg">
+                    <span className="material-symbols-outlined text-[24px] animate-spin">
+                      auto_awesome
+                    </span>
+                  </div>
+                  <p className="text-[13px] font-semibold text-inverse-on-surface">
+                    {scanStatusText}
+                  </p>
+                  <span className="text-[11px] text-inverse-on-surface/75">
+                    กำลังวิเคราะห์ชื่อสินค้า วัสดุ สี และจัดเข้าหมวดหมู่ร้าน...
+                  </span>
+                </div>
+              )}
+
               {/* Top Status Bar inside Viewfinder */}
               <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2">
                 <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary-container text-on-secondary-container shadow-sm min-w-0">
                   <span className="material-symbols-outlined material-symbols-filled text-[15px] shrink-0">
-                    admin_panel_settings
+                    auto_awesome
                   </span>
                   <span className="text-[11px] font-medium truncate">
-                    {role === "owner" ? "สิทธิ์เจ้าของร้าน (Owner)" : "โหมดพนักงาน"} • AI
-                    สแกนจีน-ไทย ({invoice.confidence}%)
+                    AI วิเคราะห์ & แยกหมวดหมู่ ({invoice.confidence}%)
                   </span>
                 </div>
 
@@ -339,16 +972,10 @@ export function AiScannerView({
                       disabled={isScanning}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-lowest/90 text-on-surface backdrop-blur-md shadow-sm active:scale-95 transition-transform text-[11px] font-medium cursor-pointer disabled:opacity-60"
                     >
-                      <span
-                        className={`material-symbols-outlined text-[15px] text-primary ${
-                          isScanning ? "animate-spin" : ""
-                        }`}
-                      >
-                        {isScanning ? "sync" : "document_scanner"}
+                      <span className="material-symbols-outlined text-[15px] text-primary">
+                        document_scanner
                       </span>
-                      <span className="whitespace-nowrap">
-                        {isScanning ? "กำลังสแกน..." : "สแกนใหม่"}
-                      </span>
+                      <span className="whitespace-nowrap">บิลตัวอย่าง</span>
                     </button>
                   </div>
                 )}
@@ -385,7 +1012,7 @@ export function AiScannerView({
                 />
               </div>
 
-              {/* AI OCR Bounding-Box Highlight Overlay */}
+              {/* AI OCR Highlight Overlay */}
               <div className="absolute inset-x-3 bottom-3 rounded-lg bg-surface-container-lowest/95 backdrop-blur-md p-2.5 shadow-md">
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-1.5 min-w-0">
@@ -413,29 +1040,93 @@ export function AiScannerView({
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-[12px] truncate">
-                          {idx + 1}. {item.chineseName} ({item.thaiName})
+                          {idx + 1}. {item.thaiName}
                         </span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded bg-surface-container-lowest text-[10px] font-semibold shrink-0 tabular-nums ${
-                            idx === 0 ? "text-primary" : "text-secondary"
-                          }`}
-                        >
-                          x{item.quantity} ชิ้น
+                        <span className="px-1.5 py-0.5 rounded bg-surface-container-lowest text-[10px] font-semibold shrink-0 text-primary">
+                          {item.category}
                         </span>
                       </div>
-                      {role === "owner" && (
-                        <span className="text-[12px] font-semibold tabular-nums shrink-0 ml-2">
-                          ¥{item.unitPriceCny.toFixed(2)}
-                        </span>
-                      )}
+                      <span className="text-[11px] font-semibold tabular-nums shrink-0 ml-2">
+                        x{item.quantity}
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
+            {/* Quick AI Action Bar under Viewfinder */}
+            {role === "owner" && (
+              <div className="p-2.5 bg-surface-container-low/70 border-t border-surface-container flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  disabled={isScanning || invoice.items.length === 0}
+                  onClick={() => void handleAnalyzeWithAi("reanalyze")}
+                  className="flex-1 min-w-[160px] h-9 px-3 rounded-lg bg-primary text-on-primary text-[12px] font-semibold flex items-center justify-center gap-1.5 hover:bg-primary-dim active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    auto_awesome
+                  </span>
+                  <span>ให้ AI วิเคราะห์ & แยกหมวดหมู่ใหม่</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isScanning}
+                  onClick={() => setShowTextBillInput((prev) => !prev)}
+                  className={`h-9 px-3 rounded-lg text-[12px] font-semibold flex items-center justify-center gap-1.5 border transition-colors cursor-pointer ${
+                    showTextBillInput
+                      ? "bg-primary-fixed text-on-primary-fixed border-primary/40"
+                      : "bg-surface-container-lowest text-on-surface border-outline-variant/50 hover:bg-surface-container"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    content_paste_search
+                  </span>
+                  <span>วางข้อความบิล</span>
+                </button>
+              </div>
+            )}
+
+            {/* Collapsible Text Bill Paste Panel */}
+            {showTextBillInput && role === "owner" && (
+              <div className="p-3 bg-surface-container-lowest border-t border-surface-container flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-semibold text-on-surface">
+                    วางข้อความบิล / รายการสั่งซื้อจากแชท (จีน-ไทย-อังกฤษ)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowTextBillInput(false)}
+                    className="text-[11px] text-on-surface-variant hover:text-on-surface cursor-pointer"
+                  >
+                    ซ่อน
+                  </button>
+                </div>
+                <textarea
+                  rows={4}
+                  value={billTextInput}
+                  onChange={(e) => setBillTextInput(e.target.value)}
+                  placeholder="ตัวอย่าง:&#10;1. 复古手提小方包 สีดำ/น้ำตาล 30 ใบ ¥42&#10;2. กระเป๋าเป้กันน้ำ สีครีม 20 ใบ ¥35&#10;3. พวงกุญแจหมีขนฟูห้อยกระเป๋า 50 ชิ้น ¥6.5"
+                  className="w-full rounded-lg bg-surface-container-low border border-outline-variant/40 p-2.5 text-[12px] text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary resize-y"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={isScanning || !billTextInput.trim()}
+                    onClick={() => void handleAnalyzeWithAi("text")}
+                    className="h-9 px-4 rounded-lg bg-secondary text-on-secondary text-[12px] font-semibold flex items-center gap-1.5 hover:opacity-90 cursor-pointer disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">
+                      psychology
+                    </span>
+                    <span>วิเคราะห์ข้อความและแยกหมวดหมู่</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {scanError && (
-              <div className="px-3 py-2 bg-error-container/20 text-error text-[12px] flex items-center justify-between gap-2">
+              <div className="px-3 py-2 bg-error-container/25 text-error text-[12px] flex items-center justify-between gap-2 border-t border-error/20">
                 <span>{scanError}</span>
                 <button
                   type="button"
@@ -446,6 +1137,165 @@ export function AiScannerView({
                 </button>
               </div>
             )}
+          </section>
+
+          {/* AI Bill Analysis & Category Distribution Card */}
+          <section className="w-full rounded-xl bg-surface-container-lowest p-4 shadow-sm border border-primary/15 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-primary-fixed flex items-center justify-center text-on-primary-fixed shrink-0">
+                  <span className="material-symbols-outlined text-[18px]">
+                    psychology
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-[14px] font-semibold text-on-surface truncate">
+                    ผลวิเคราะห์และแยกหมวดหมู่โดย AI
+                  </h2>
+                  <p className="text-[11px] text-on-surface-variant truncate">
+                    {invoice.aiAnalysis?.supplierType ||
+                      "วิเคราะห์โครงสร้างสินค้าและต้นทุนนำเข้า"}
+                  </p>
+                </div>
+              </div>
+              {invoice.aiAnalysis?.currencyDetected && (
+                <span className="px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-semibold shrink-0">
+                  {invoice.aiAnalysis.currencyDetected}
+                </span>
+              )}
+            </div>
+
+            {invoice.aiAnalysis?.summary && (
+              <p className="text-[12px] text-on-surface leading-relaxed bg-surface-container-low/70 rounded-lg p-2.5">
+                {invoice.aiAnalysis.summary}
+              </p>
+            )}
+
+            {/* Quick Classification Metrics */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-surface-container-low p-2 text-center">
+                <span className="text-[10px] text-on-surface-variant block">
+                  แยกได้ทั้งหมด
+                </span>
+                <span className="text-[14px] font-bold text-primary tabular-nums">
+                  {categoryBreakdown.length} หมวด
+                </span>
+              </div>
+              <div className="rounded-lg bg-secondary-container/40 p-2 text-center">
+                <span className="text-[10px] text-on-secondary-container block">
+                  เติมสต็อกเดิม
+                </span>
+                <span className="text-[14px] font-bold text-secondary tabular-nums">
+                  {restockCount} รายการ
+                </span>
+              </div>
+              <div className="rounded-lg bg-primary-fixed/40 p-2 text-center">
+                <span className="text-[10px] text-on-primary-fixed block">
+                  สินค้าใหม่
+                </span>
+                <span className="text-[14px] font-bold text-primary tabular-nums">
+                  {newProductCount} รายการ
+                </span>
+              </div>
+            </div>
+
+            {/* Category Breakdown Bars */}
+            {categoryBreakdown.length > 0 && (
+              <div className="flex flex-col gap-2 pt-1">
+                <span className="text-[11px] font-semibold text-on-surface-variant">
+                  สัดส่วนสินค้าแยกตามหมวดหมู่ (กดเพื่อกรอง)
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  {categoryBreakdown.map((cat) => {
+                    const pct =
+                      totalQty > 0
+                        ? Math.round((cat.totalQty / totalQty) * 100)
+                        : 0;
+                    const isSelected = selectedCategoryFilter === cat.category;
+                    return (
+                      <button
+                        key={cat.category}
+                        type="button"
+                        onClick={() =>
+                          setSelectedCategoryFilter((prev) =>
+                            prev === cat.category ? "ทั้งหมด" : cat.category
+                          )
+                        }
+                        className={`w-full text-left rounded-lg p-2 border transition-colors cursor-pointer ${
+                          isSelected
+                            ? "bg-primary-fixed/50 border-primary/50"
+                            : "bg-surface-container-low/60 border-transparent hover:border-outline-variant/40"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 text-[12px] mb-1">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-semibold text-on-surface truncate">
+                              {cat.category}
+                            </span>
+                            {cat.isNewCategory && (
+                              <span className="px-1.5 py-0.5 rounded bg-primary text-on-primary text-[9px] font-semibold shrink-0">
+                                หมวดใหม่
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-medium text-on-surface-variant tabular-nums shrink-0">
+                            {cat.itemCount} รุ่น · {cat.totalQty} ชิ้น ({pct}%)
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 rounded-full bg-surface-container overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{ width: `${Math.max(6, pct)}%` }}
+                          />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* One-click add all AI-suggested new categories */}
+            {unaddedNewCategories.length > 0 && (
+              <div className="rounded-lg bg-primary-fixed/40 border border-primary/25 p-2.5 flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-[11px] text-on-primary-fixed">
+                  AI พบหมวดหมู่ใหม่{" "}
+                  <strong>{unaddedNewCategories.join(", ")}</strong>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    unaddedNewCategories.forEach((c) => onAddCategory(c));
+                  }}
+                  className="px-2.5 py-1 rounded-md bg-primary text-on-primary text-[11px] font-semibold cursor-pointer hover:bg-primary-dim"
+                >
+                  + เพิ่มหมวดใหม่เข้าร้านทั้งหมด
+                </button>
+              </div>
+            )}
+
+            {/* AI Key Highlights */}
+            {invoice.aiAnalysis?.keyHighlights &&
+              invoice.aiAnalysis.keyHighlights.length > 0 && (
+                <div className="flex flex-col gap-1.5 pt-1 border-t border-surface-container">
+                  <span className="text-[11px] font-semibold text-on-surface-variant">
+                    จุดสังเกตและคำแนะนำจาก AI
+                  </span>
+                  <ul className="flex flex-col gap-1">
+                    {invoice.aiAnalysis.keyHighlights.map((point, idx) => (
+                      <li
+                        key={idx}
+                        className="flex items-start gap-1.5 text-[11.5px] text-on-surface leading-snug"
+                      >
+                        <span className="material-symbols-outlined text-[14px] text-secondary shrink-0 mt-0.5">
+                          check_circle
+                        </span>
+                        <span>{point}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
           </section>
 
           {/* Exchange Rate & Freight Cost Panel (Owner Only) + Auto-save */}
@@ -464,7 +1314,16 @@ export function AiScannerView({
                         เรทเงินและค่าขนส่งนำเข้า
                       </span>
                       <span className="text-[11px] text-on-surface-variant block truncate">
-                        คำนวณต้นทุนรวมสุทธิ (Landed Cost per unit)
+                        ยอดรวมบิล ¥{totalBillCny.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        (≈ ฿
+                        {Math.round(
+                          totalBillCny * exchangeRate +
+                            (splitByQty ? freightCost : 0)
+                        ).toLocaleString()}
+                        )
                       </span>
                     </div>
                   </div>
@@ -565,7 +1424,11 @@ export function AiScannerView({
               </>
             )}
 
-            <div className={role === "owner" ? "pt-2 border-t border-surface-container" : ""}>
+            <div
+              className={
+                role === "owner" ? "pt-2 border-t border-surface-container" : ""
+              }
+            >
               <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface-container-low gap-2">
                 <div className="flex items-start gap-2 min-w-0">
                   <span className="material-symbols-outlined text-[20px] text-primary shrink-0 mt-0.5">
@@ -581,14 +1444,12 @@ export function AiScannerView({
                           <span className="material-symbols-outlined text-[12px]">
                             check_circle
                           </span>
-                          <span>บันทึกข้อมูลอัตโนมัติแล้ว</span>
+                          <span>เปิดใช้งาน</span>
                         </span>
                       )}
                     </div>
                     <span className="text-[11px] text-on-surface-variant mt-0.5 leading-snug">
-                      {role === "owner"
-                        ? "เมื่อ AI สแกนและคำนวณเรทเงิน/ค่าส่งเสร็จสิ้น ระบบจะบันทึกข้อมูลและอัปเดตต้นทุนเข้าคลังสินค้าทันที"
-                        : "เมื่อ AI สแกนบิลเสร็จสิ้น ระบบจะบันทึกรายการและจำนวนสินค้าเข้าคลังทันทีโดยอัตโนมัติ"}
+                      บันทึกต้นทุนและหมวดหมู่ที่ AI แยกไว้เข้าคลังสินค้าทันทีเมื่อกดยืนยัน
                     </span>
                   </div>
                 </div>
@@ -613,24 +1474,87 @@ export function AiScannerView({
           </section>
         </div>
 
-        {/* Right Column: Parsed Items List & Primary Action */}
+        {/* Right Column: Categorized & Parsed Items List + Primary Action */}
         <div className="lg:col-span-7 flex flex-col gap-3">
-          <div className="flex flex-col gap-2 px-0.5">
+          <div className="flex flex-col gap-2.5 px-0.5">
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-[16px] font-semibold text-on-surface">
-                  รายการสินค้าที่ AI แยกได้
+                  รายการสินค้าที่ AI แยกและจัดหมวดหมู่
                 </h2>
                 <span className="px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant text-[11px] font-semibold tabular-nums">
                   {invoice.items.length} รายการ · {totalQty} ชิ้น
                 </span>
               </div>
-              <span className="text-[11px] text-secondary bg-secondary-container/50 px-2.5 py-0.5 rounded-full font-medium">
-                {role === "owner" ? "สิทธิ์ Owner บันทึกต้นทุน" : "โหมดพนักงาน (ไม่แสดงต้นทุน)"}
-              </span>
+
+              {/* Group vs List Toggle */}
+              <div className="inline-flex items-center rounded-lg bg-surface-container p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("grouped")}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                    viewMode === "grouped"
+                      ? "bg-surface-container-lowest text-primary shadow-xs"
+                      : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[14px]">
+                    workspaces
+                  </span>
+                  <span>แยกตามหมวดหมู่</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                    viewMode === "list"
+                      ? "bg-surface-container-lowest text-primary shadow-xs"
+                      : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[14px]">
+                    view_list
+                  </span>
+                  <span>เรียงตามบิล</span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Category Filter Chips */}
+            {categoryBreakdown.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategoryFilter("ทั้งหมด")}
+                  className={`px-3 py-1 rounded-lg text-[12px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                    selectedCategoryFilter === "ทั้งหมด"
+                      ? "bg-primary text-on-primary shadow-xs"
+                      : "bg-surface-container-lowest text-on-surface-variant border border-outline-variant/40 hover:bg-surface-container-low"
+                  }`}
+                >
+                  ทั้งหมด ({invoice.items.length})
+                </button>
+                {categoryBreakdown.map((cat) => (
+                  <button
+                    key={cat.category}
+                    type="button"
+                    onClick={() => setSelectedCategoryFilter(cat.category)}
+                    className={`px-3 py-1 rounded-lg text-[12px] font-semibold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+                      selectedCategoryFilter === cat.category
+                        ? "bg-primary text-on-primary shadow-xs"
+                        : "bg-surface-container-lowest text-on-surface-variant border border-outline-variant/40 hover:bg-surface-container-low"
+                    }`}
+                  >
+                    <span>{cat.category}</span>
+                    <span className="opacity-80 tabular-nums">
+                      ({cat.itemCount})
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={onOpenAddProduct}
@@ -641,103 +1565,105 @@ export function AiScannerView({
                 </span>
                 <span>+ เพิ่มสินค้าใหม่</span>
               </button>
+
+              {role === "owner" &&
+                invoice.items.length > 0 &&
+                (confirmClearBill ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={handleClearAllScannedItems}
+                      className="h-10 px-3 rounded-lg bg-error text-on-error text-[12px] font-semibold cursor-pointer"
+                    >
+                      ยืนยันล้างบิล
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearBill(false)}
+                      className="h-10 px-2.5 rounded-lg bg-surface-container text-on-surface-variant text-[12px] font-medium cursor-pointer"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearBill(true)}
+                    className="h-10 px-3 rounded-lg bg-error-container/60 hover:bg-error text-error hover:text-on-error text-[12px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">
+                      delete_sweep
+                    </span>
+                    <span>ลบรายการทั้งหมด</span>
+                  </button>
+                ))}
             </div>
           </div>
 
+          {/* Items Render: Grouped by Category or Flat List */}
           <div className="flex flex-col gap-3">
-            {invoice.items.map((item) => {
-              const landedCost = item.unitPriceCny * exchangeRate + freightPerUnit;
-              return (
-                <article
-                  key={item.id}
-                  className="w-full rounded-xl bg-surface-container-lowest p-4 shadow-sm flex items-center gap-3"
-                >
-                  <div className="flex flex-col items-center gap-1.5 shrink-0">
-                    <ResilientImage
-                      src={item.imageUrl}
-                      alt={item.thaiName}
-                      className="w-14 h-14 rounded-lg object-cover bg-surface-container shrink-0"
-                    />
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        title="ถ่ายรูปด้วยกล้อง"
-                        onClick={() => handleTriggerItemImage(item.id, "camera")}
-                        className="px-1.5 py-0.5 rounded-md bg-primary-fixed/80 hover:bg-primary-fixed text-on-primary-fixed text-[10px] font-semibold flex items-center gap-0.5 whitespace-nowrap cursor-pointer transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[12px]">
-                          photo_camera
-                        </span>
-                        <span>กล้อง</span>
-                      </button>
-                      <button
-                        type="button"
-                        title="เลือกจากคลังรูปภาพ"
-                        onClick={() => handleTriggerItemImage(item.id, "gallery")}
-                        className="px-1.5 py-0.5 rounded-md bg-surface-container hover:bg-surface-container-high text-on-surface text-[10px] font-semibold flex items-center gap-0.5 whitespace-nowrap cursor-pointer transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[12px]">
-                          photo_library
-                        </span>
-                        <span>คลัง</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-[14px] font-semibold text-on-surface line-clamp-2">
-                        {item.thaiName} ({item.chineseName})
-                      </h3>
-                      <span className="text-[11px] text-on-surface-variant shrink-0">
-                        {item.sku}
-                      </span>
-                    </div>
+            {filteredItems.length === 0 ? (
+              <div className="rounded-xl bg-surface-container-lowest p-6 text-center text-[13px] text-on-surface-variant border border-outline-variant/30">
+                ไม่มีรายการสินค้าในหมวดหมู่นี้ — อัปโหลดบิล วางข้อความบิล หรือเลือกบิลตัวอย่างเพื่อเริ่มวิเคราะห์
+              </div>
+            ) : viewMode === "grouped" ? (
+              groupedItems.map(([categoryName, itemsInCat]) => {
+                const groupQty = itemsInCat.reduce(
+                  (sum, i) => sum + i.quantity,
+                  0
+                );
+                const groupCny = itemsInCat.reduce(
+                  (sum, i) => sum + i.quantity * i.unitPriceCny,
+                  0
+                );
+                const isGroupNew = !categories.includes(categoryName);
 
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-medium">
-                          <button
-                            type="button"
-                            aria-label="ลดจำนวน"
-                            onClick={() => handleItemQtyDelta(item.id, -1)}
-                            className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-white/40 cursor-pointer"
-                          >
-                            -
-                          </button>
-                          <span className="tabular-nums px-1">
-                            จำนวน: {item.quantity} ชิ้น
+                return (
+                  <div
+                    key={categoryName}
+                    className="flex flex-col gap-2.5 rounded-xl bg-surface-container-low/60 p-3 border border-outline-variant/30"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap px-0.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-7 h-7 rounded-lg bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0">
+                          <span className="material-symbols-outlined text-[16px]">
+                            folder_open
                           </span>
+                        </span>
+                        <h3 className="text-[14px] font-bold text-on-surface truncate">
+                          {categoryName}
+                        </h3>
+                        {isGroupNew && (
                           <button
                             type="button"
-                            aria-label="เพิ่มจำนวน"
-                            onClick={() => handleItemQtyDelta(item.id, 1)}
-                            className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-white/40 cursor-pointer"
+                            onClick={() => onAddCategory(categoryName)}
+                            className="px-2 py-0.5 rounded-md bg-primary text-on-primary text-[10px] font-semibold cursor-pointer"
                           >
-                            +
+                            + เพิ่มหมวดเข้าร้าน
                           </button>
-                        </div>
-                        <span className="text-[13px] text-on-surface-variant tabular-nums">
-                          {role === "owner"
-                            ? `ราคาจีน: ¥${item.unitPriceCny.toFixed(2)}`
-                            : `หมวด: ${item.category}`}
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] font-semibold text-on-surface-variant tabular-nums">
+                        <span>
+                          {itemsInCat.length} รุ่น · {groupQty} ชิ้น
                         </span>
+                        {role === "owner" && (
+                          <span className="text-secondary">
+                            (¥{groupCny.toFixed(0)})
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    {role === "owner" && (
-                      <div className="flex items-center justify-between mt-0.5 bg-surface-container-low/80 rounded-lg px-3 py-1.5">
-                        <span className="text-[11px] text-on-surface-variant">
-                          ต้นทุนรวมค่าส่ง
-                        </span>
-                        <span className="text-[15px] font-semibold text-secondary tabular-nums">
-                          ฿{landedCost.toFixed(2)}/ชิ้น
-                        </span>
-                      </div>
-                    )}
+                    <div className="flex flex-col gap-2.5">
+                      {itemsInCat.map((item) => renderItemCard(item))}
+                    </div>
                   </div>
-                </article>
-              );
-            })}
+                );
+              })
+            ) : (
+              filteredItems.map((item) => renderItemCard(item))
+            )}
           </div>
 
           {/* Bottom Primary CTA */}
@@ -761,14 +1687,17 @@ export function AiScannerView({
                 onClick={onToggleRoleMode}
                 className="text-primary text-[12px] font-medium underline shrink-0 cursor-pointer"
               >
-                {role === "owner" ? "สลับให้พนักงานบันทึก" : "ปลดล็อกเจ้าของร้าน"}
+                {role === "owner"
+                  ? "สลับเป็นโหมดพนักงาน"
+                  : "ปลดล็อกเจ้าของร้าน"}
               </button>
             </div>
 
             <button
               type="button"
+              disabled={invoice.items.length === 0}
               onClick={handleCommitInventory}
-              className={`w-full h-12 rounded-xl font-semibold text-[14px] shadow-md flex items-center justify-center gap-2 active:scale-[0.98] transition-all cursor-pointer ${
+              className={`w-full h-12 rounded-xl font-semibold text-[14px] shadow-md flex items-center justify-center gap-2 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 ${
                 savedSuccess
                   ? "bg-secondary text-on-secondary"
                   : "bg-primary text-on-primary hover:bg-primary-dim"
@@ -780,7 +1709,7 @@ export function AiScannerView({
               <span>
                 {savedSuccess
                   ? `บันทึกเข้าคลังสำเร็จแล้ว (${totalQty} ชิ้น)`
-                  : `บันทึกเข้าคลังสินค้า (นำเข้า ${totalQty} ชิ้น)`}
+                  : `บันทึกเข้าคลังตามหมวดหมู่ (นำเข้า ${totalQty} ชิ้น · ${categoryBreakdown.length} หมวด)`}
               </span>
             </button>
           </div>
