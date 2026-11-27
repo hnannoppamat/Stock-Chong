@@ -1,8 +1,6 @@
-import { onAuthStateChanged, User } from "firebase/auth";
 import { useEffect, useState } from "react";
 import { AiChatWidget } from "./components/AiChatWidget";
 import { AiScannerView } from "./components/AiScannerView";
-import { AuthGate } from "./components/AuthGate";
 import { BottomNav } from "./components/BottomNav";
 import { CustomersView } from "./components/CustomersView";
 import { Header } from "./components/Header";
@@ -17,36 +15,15 @@ import {
 import { OrdersView } from "./components/OrdersView";
 import { OwnerAuthView } from "./components/OwnerAuthView";
 import {
+  INITIAL_APPROVALS,
   INITIAL_CATEGORIES,
+  INITIAL_CUSTOMERS,
   INITIAL_INVOICE,
+  INITIAL_NOTIFICATIONS,
+  INITIAL_ORDERS,
+  INITIAL_PRODUCTS,
+  LEGACY_DEFAULT_CATEGORIES,
 } from "./data/initialData";
-import { auth, signOutUser } from "./firebase";
-import {
-  confirmOrderDeliveryDoc,
-  confirmOrderShipDoc,
-  createApprovalDoc,
-  createCustomerDoc,
-  createNotificationDoc,
-  createOrderDoc,
-  createProductDoc,
-  deleteCustomerDoc,
-  ensureUserWorkspace,
-  markNotificationReadDoc,
-  markOrderReadyToShipDoc,
-  packOrderDoc,
-  resolveApprovalDoc,
-  sanitizeDocId,
-  subscribeApprovals,
-  subscribeCustomers,
-  subscribeNotifications,
-  subscribeOrders,
-  subscribeProducts,
-  subscribeWorkspace,
-  updateCustomerDoc,
-  updateOrderItemsDoc,
-  updateProductDoc,
-  updateWorkspaceSettings,
-} from "./services/firestoreService";
 import {
   AppNotification,
   CourierName,
@@ -66,28 +43,139 @@ import {
 } from "./types";
 
 const DEFAULT_OWNER_NAME = "คุณธนวัฒน์";
-const ADMIN_EMAIL = "hnan.noppamat@gmail.com";
+const DEFAULT_OWNER_PIN = "123456";
+const STORAGE_KEY = "denewstock_store_v1";
+
+interface PersistedStore {
+  ownerName: string;
+  ownerPin: string;
+  categories: string[];
+  products: ProductItem[];
+  orders: Order[];
+  customers: Customer[];
+  approvals: StockApprovalRequest[];
+  notifications: AppNotification[];
+  exchangeRate: number;
+  freightCost: number;
+  splitByQty: boolean;
+  autoSave: boolean;
+}
+
+function isLegacyOnlyCategories(cats: unknown): boolean {
+  if (!Array.isArray(cats) || cats.length === 0) return true;
+  return cats.every(
+    (c) => typeof c === "string" && LEGACY_DEFAULT_CATEGORIES.includes(c)
+  );
+}
+
+function loadInitialStore(): PersistedStore {
+  const defaults: PersistedStore = {
+    ownerName: DEFAULT_OWNER_NAME,
+    ownerPin: DEFAULT_OWNER_PIN,
+    categories: INITIAL_CATEGORIES,
+    products: INITIAL_PRODUCTS,
+    orders: INITIAL_ORDERS,
+    customers: INITIAL_CUSTOMERS,
+    approvals: INITIAL_APPROVALS,
+    notifications: INITIAL_NOTIFICATIONS,
+    exchangeRate: 4.95,
+    freightCost: 1250,
+    splitByQty: true,
+    autoSave: true,
+  };
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw) as Partial<PersistedStore>;
+
+    const categories = isLegacyOnlyCategories(parsed.categories)
+      ? INITIAL_CATEGORIES
+      : (parsed.categories as string[]);
+
+    const ownerPin =
+      typeof parsed.ownerPin === "string" && /^\d{6}$/.test(parsed.ownerPin)
+        ? parsed.ownerPin
+        : DEFAULT_OWNER_PIN;
+
+    return {
+      ownerName:
+        typeof parsed.ownerName === "string" && parsed.ownerName.trim()
+          ? parsed.ownerName.trim()
+          : DEFAULT_OWNER_NAME,
+      ownerPin,
+      categories,
+      products: Array.isArray(parsed.products)
+        ? parsed.products
+        : INITIAL_PRODUCTS,
+      orders: Array.isArray(parsed.orders) ? parsed.orders : INITIAL_ORDERS,
+      customers: Array.isArray(parsed.customers)
+        ? parsed.customers
+        : INITIAL_CUSTOMERS,
+      approvals: Array.isArray(parsed.approvals)
+        ? parsed.approvals
+        : INITIAL_APPROVALS,
+      notifications: Array.isArray(parsed.notifications)
+        ? parsed.notifications
+        : INITIAL_NOTIFICATIONS,
+      exchangeRate:
+        typeof parsed.exchangeRate === "number" &&
+        Number.isFinite(parsed.exchangeRate)
+          ? parsed.exchangeRate
+          : 4.95,
+      freightCost:
+        typeof parsed.freightCost === "number" &&
+        Number.isFinite(parsed.freightCost)
+          ? parsed.freightCost
+          : 1250,
+      splitByQty:
+        typeof parsed.splitByQty === "boolean" ? parsed.splitByQty : true,
+      autoSave: typeof parsed.autoSave === "boolean" ? parsed.autoSave : true,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function makeId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
 
 export default function App() {
-  const [authReady, setAuthReady] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [workspaceReady, setWorkspaceReady] = useState(false);
-  const [fatalError, setFatalError] = useState<Error | null>(null);
+  const [initialStore] = useState<PersistedStore>(() => loadInitialStore());
 
   const [activeTab, setActiveTab] = useState<TabId>("inventory");
-  const [role, setRole] = useState<RoleMode>("owner");
-  const [ownerName, setOwnerName] = useState<string>(DEFAULT_OWNER_NAME);
-  const [products, setProducts] = useState<ProductItem[]>([]);
-  const [categories, setCategories] = useState<string[]>(INITIAL_CATEGORIES);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [approvals, setApprovals] = useState<StockApprovalRequest[]>([]);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  // Open directly in Staff mode without any login screen; Owner mode unlocks via 6-digit PIN
+  const [role, setRole] = useState<RoleMode>("staff");
+  const [ownerName, setOwnerName] = useState<string>(initialStore.ownerName);
+  const [ownerPin, setOwnerPin] = useState<string>(initialStore.ownerPin);
+  const [products, setProducts] = useState<ProductItem[]>(
+    initialStore.products
+  );
+  const [categories, setCategories] = useState<string[]>(
+    initialStore.categories
+  );
+  const [orders, setOrders] = useState<Order[]>(initialStore.orders);
+  const [customers, setCustomers] = useState<Customer[]>(
+    initialStore.customers
+  );
+  const [approvals, setApprovals] = useState<StockApprovalRequest[]>(
+    initialStore.approvals
+  );
+  const [notifications, setNotifications] = useState<AppNotification[]>(
+    initialStore.notifications
+  );
   const [invoice, setInvoice] = useState<ScannedInvoice>(INITIAL_INVOICE);
-  const [exchangeRate, setExchangeRate] = useState<number>(4.95);
-  const [freightCost, setFreightCost] = useState<number>(1250);
-  const [splitByQty, setSplitByQty] = useState<boolean>(true);
-  const [autoSave, setAutoSave] = useState<boolean>(true);
+  const [exchangeRate, setExchangeRate] = useState<number>(
+    initialStore.exchangeRate
+  );
+  const [freightCost, setFreightCost] = useState<number>(
+    initialStore.freightCost
+  );
+  const [splitByQty, setSplitByQty] = useState<boolean>(
+    initialStore.splitByQty
+  );
+  const [autoSave, setAutoSave] = useState<boolean>(initialStore.autoSave);
 
   const [activeOrderTab, setActiveOrderTab] = useState<OrdersTab>("pending");
   const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
@@ -112,11 +200,6 @@ export default function App() {
     icon: string;
   }>({ visible: false, message: "", icon: "check_circle" });
 
-  // Surface Firestore errors to ErrorBoundary cleanly
-  if (fatalError) {
-    throw fatalError;
-  }
-
   const stampSynced = () => {
     const now = new Date();
     setLastSyncedLabel(
@@ -127,131 +210,42 @@ export default function App() {
     );
   };
 
-  // Track Firebase Auth state
+  // Auto-persist store state to localStorage
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (nextUser) => {
-      setUser(nextUser);
-      setAuthReady(true);
-      if (!nextUser) {
-        setWorkspaceReady(false);
-        setProducts([]);
-        setOrders([]);
-        setCustomers([]);
-        setApprovals([]);
-        setNotifications([]);
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  // Initialize workspace & attach Firestore real-time listeners ONLY when authenticated
-  useEffect(() => {
-    if (!authReady || !user) return;
-
-    let cancelled = false;
-    const unsubscribers: (() => void)[] = [];
-
-    const handleErr = (err: unknown) => {
-      if (cancelled) return;
-      setFatalError(err instanceof Error ? err : new Error(String(err)));
-    };
-
-    const boot = async () => {
-      try {
-        await ensureUserWorkspace(
-          user.uid,
-          user.displayName?.trim() || DEFAULT_OWNER_NAME
-        );
-        if (cancelled) return;
-
-        unsubscribers.push(
-          subscribeWorkspace(
-            user.uid,
-            (ws) => {
-              setOwnerName(ws.ownerName || DEFAULT_OWNER_NAME);
-              setRole(ws.roleMode === "staff" ? "staff" : "owner");
-              setCategories(
-                Array.isArray(ws.categories) && ws.categories.length > 0
-                  ? ws.categories
-                  : INITIAL_CATEGORIES
-              );
-              setExchangeRate(Number(ws.exchangeRate ?? 4.95));
-              setFreightCost(Number(ws.freightCost ?? 1250));
-              setSplitByQty(Boolean(ws.splitByQty));
-              setAutoSave(Boolean(ws.autoSave));
-              setWorkspaceReady(true);
-              stampSynced();
-            },
-            handleErr
-          )
-        );
-
-        unsubscribers.push(
-          subscribeProducts(
-            user.uid,
-            (list) => {
-              setProducts(list);
-              stampSynced();
-            },
-            handleErr
-          )
-        );
-
-        unsubscribers.push(
-          subscribeOrders(
-            user.uid,
-            (list) => {
-              setOrders(list);
-              stampSynced();
-            },
-            handleErr
-          )
-        );
-
-        unsubscribers.push(
-          subscribeApprovals(
-            user.uid,
-            (list) => {
-              setApprovals(list);
-              stampSynced();
-            },
-            handleErr
-          )
-        );
-
-        unsubscribers.push(
-          subscribeNotifications(
-            user.uid,
-            (list) => {
-              setNotifications(list);
-              stampSynced();
-            },
-            handleErr
-          )
-        );
-
-        unsubscribers.push(
-          subscribeCustomers(
-            user.uid,
-            (list) => {
-              setCustomers(list);
-              stampSynced();
-            },
-            handleErr
-          )
-        );
-      } catch (err) {
-        handleErr(err);
-      }
-    };
-
-    boot();
-
-    return () => {
-      cancelled = true;
-      unsubscribers.forEach((fn) => fn());
-    };
-  }, [authReady, user]);
+    try {
+      const payload: PersistedStore = {
+        ownerName,
+        ownerPin,
+        categories,
+        products,
+        orders,
+        customers,
+        approvals,
+        notifications,
+        exchangeRate,
+        freightCost,
+        splitByQty,
+        autoSave,
+      };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      stampSynced();
+    } catch {
+      // Ignore storage quota errors gracefully
+    }
+  }, [
+    ownerName,
+    ownerPin,
+    categories,
+    products,
+    orders,
+    customers,
+    approvals,
+    notifications,
+    exchangeRate,
+    freightCost,
+    splitByQty,
+    autoSave,
+  ]);
 
   // Bill scanner and weekly sales chart are restricted to Owner mode only
   useEffect(() => {
@@ -274,37 +268,20 @@ export default function App() {
     );
   };
 
-  if (!authReady || !user) {
-    return <AuthGate loading={!authReady} />;
-  }
-
-  if (!workspaceReady) {
-    return <AuthGate loading={true} />;
-  }
-
-  const uid = user.uid;
-  const isBootstrappedAdmin = user.email === ADMIN_EMAIL;
-
-  const runDb = (promise: Promise<unknown>) => {
-    promise.catch((err) => {
-      setFatalError(err instanceof Error ? err : new Error(String(err)));
-    });
-  };
-
   const pushNotification = (
     title: string,
     detail: string,
     type: AppNotification["type"]
   ) => {
     const noti: AppNotification = {
-      id: sanitizeDocId(`noti-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`),
+      id: makeId("noti"),
       title,
       detail,
       time: "เมื่อสักครู่",
       type,
       read: false,
     };
-    runDb(createNotificationDoc(uid, noti));
+    setNotifications((prev) => [noti, ...prev].slice(0, 50));
   };
 
   const pendingOrdersCount = orders.filter((o) => o.status === "pending").length;
@@ -413,12 +390,15 @@ export default function App() {
     setActiveTab(nextTab);
   };
 
-  const handleRoleChange = (nextRole: RoleMode, toastMsg: string, icon: string) => {
+  const handleRoleChange = (
+    nextRole: RoleMode,
+    toastMsg: string,
+    icon: string
+  ) => {
     setRole(nextRole);
     if (nextRole === "staff" && activeTab === "ai-scanner") {
       setActiveTab("inventory");
     }
-    runDb(updateWorkspaceSettings(uid, { roleMode: nextRole }));
     showToast(toastMsg, icon);
   };
 
@@ -428,35 +408,36 @@ export default function App() {
     freightPerUnit: number
   ) => {
     let importedUnits = 0;
-    items.forEach((scanned) => {
-      importedUnits += scanned.quantity;
-      const landedCost = Number(
-        (scanned.unitPriceCny * rate + freightPerUnit).toFixed(2)
-      );
-      const existing = products.find(
-        (p) => p.sku.toLowerCase() === scanned.sku.toLowerCase()
-      );
-      if (existing) {
-        runDb(
-          updateProductDoc(uid, existing.id, {
+
+    setProducts((prev) => {
+      const next = [...prev];
+      items.forEach((scanned) => {
+        importedUnits += scanned.quantity;
+        const landedCost = Number(
+          (scanned.unitPriceCny * rate + freightPerUnit).toFixed(2)
+        );
+        const existingIdx = next.findIndex(
+          (p) => p.sku.toLowerCase() === scanned.sku.toLowerCase()
+        );
+        if (existingIdx >= 0) {
+          const existing = next[existingIdx];
+          next[existingIdx] = {
+            ...existing,
             stock: existing.stock + scanned.quantity,
             landedCostThb: landedCost,
             cnyUnitPrice: scanned.unitPriceCny,
             freightPerUnitThb: Number(freightPerUnit.toFixed(2)),
             imageUrl: scanned.imageUrl || existing.imageUrl,
-            updatedAtLabel: "เมื่อสักครู่",
-          })
-        );
-      } else {
-        const newId = sanitizeDocId(
-          `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-        );
-        runDb(
-          createProductDoc(uid, newId, {
+            updatedAt: "เมื่อสักครู่",
+          };
+        } else {
+          next.unshift({
+            id: makeId("prod"),
             name: scanned.thaiName,
             sku: scanned.sku,
             origin: "cn",
-            category: scanned.category || categories[0] || INITIAL_CATEGORIES[0],
+            category:
+              scanned.category || categories[0] || INITIAL_CATEGORIES[0],
             stock: scanned.quantity,
             lowThreshold: 15,
             landedCostThb: landedCost,
@@ -464,9 +445,11 @@ export default function App() {
             freightPerUnitThb: Number(freightPerUnit.toFixed(2)),
             sellPriceThb: Math.ceil((landedCost * 1.9) / 10) * 10 - 1,
             imageUrl: scanned.imageUrl,
-          })
-        );
-      }
+            updatedAt: "เมื่อสักครู่",
+          });
+        }
+      });
+      return next;
     });
 
     showToast(
@@ -483,26 +466,34 @@ export default function App() {
   };
 
   const handleAddProduct = (newProd: Omit<ProductItem, "id" | "updatedAt">) => {
-    const newId = sanitizeDocId(`prod-${Date.now()}`);
-    runDb(createProductDoc(uid, newId, newProd));
+    const created: ProductItem = {
+      ...newProd,
+      id: makeId("prod"),
+      updatedAt: "เมื่อสักครู่",
+    };
+    setProducts((prev) => [created, ...prev]);
     showToast(`เพิ่มสินค้า "${newProd.name}" เข้าคลังแล้ว`, "add_box");
   };
 
   const handleAddCategory = (categoryName: string) => {
-    const nextCategories = [...categories, categoryName];
-    setCategories(nextCategories);
-    runDb(updateWorkspaceSettings(uid, { categories: nextCategories }));
+    if (categories.includes(categoryName)) return;
+    setCategories((prev) => [...prev, categoryName]);
     showToast(`เพิ่มหมวดหมู่ "${categoryName}" แล้ว`, "category");
   };
 
   const handleUpdateProductOwner = (updated: ProductItem) => {
-    runDb(
-      updateProductDoc(uid, updated.id, {
-        stock: updated.stock,
-        sellPriceThb: updated.sellPriceThb,
-        landedCostThb: updated.landedCostThb,
-        updatedAtLabel: "เมื่อสักครู่",
-      })
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === updated.id
+          ? {
+              ...p,
+              stock: updated.stock,
+              sellPriceThb: updated.sellPriceThb,
+              landedCostThb: updated.landedCostThb,
+              updatedAt: "เมื่อสักครู่",
+            }
+          : p
+      )
     );
     showToast(`อัปเดตสต็อก ${updated.name} เป็น ${updated.stock} ชิ้น`, "save");
   };
@@ -513,7 +504,7 @@ export default function App() {
     reason: string
   ) => {
     const req: StockApprovalRequest = {
-      id: sanitizeDocId(`REQ-${Date.now().toString().slice(-5)}`),
+      id: `REQ-${Date.now().toString().slice(-5)}`,
       productId: product.id,
       productName: product.name,
       sku: product.sku,
@@ -527,7 +518,7 @@ export default function App() {
       }),
       status: "pending",
     };
-    runDb(createApprovalDoc(uid, req));
+    setApprovals((prev) => [req, ...prev]);
     pushNotification(
       "คำขออนุมัติปรับสต็อกใหม่",
       `${product.sku}: ขอปรับ ${product.stock} → ${requestedStock} ชิ้น`,
@@ -540,14 +531,25 @@ export default function App() {
     const target = approvals.find((r) => r.id === reqId);
     if (!target) return;
 
-    runDb(resolveApprovalDoc(uid, reqId, approve ? "approved" : "rejected"));
+    setApprovals((prev) =>
+      prev.map((r) =>
+        r.id === reqId
+          ? { ...r, status: approve ? "approved" : "rejected" }
+          : r
+      )
+    );
 
     if (approve) {
-      runDb(
-        updateProductDoc(uid, target.productId, {
-          stock: target.requestedStock,
-          updatedAtLabel: "เมื่อสักครู่",
-        })
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === target.productId
+            ? {
+                ...p,
+                stock: target.requestedStock,
+                updatedAt: "เมื่อสักครู่",
+              }
+            : p
+        )
       );
       showToast(
         `อนุมัติปรับสต็อก ${target.sku} เป็น ${target.requestedStock} ชิ้นแล้ว`,
@@ -559,12 +561,17 @@ export default function App() {
   };
 
   const handleToggleItemPicked = (orderId: string, itemIndex: number) => {
-    const target = orders.find((o) => o.id === orderId);
-    if (!target || target.status === "shipped") return;
-    const nextItems = target.items.map((item, idx) =>
-      idx === itemIndex ? { ...item, picked: !item.picked } : item
+    setOrders((prev) =>
+      prev.map((order) => {
+        if (order.id !== orderId || order.status === "shipped") return order;
+        return {
+          ...order,
+          items: order.items.map((item, idx) =>
+            idx === itemIndex ? { ...item, picked: !item.picked } : item
+          ),
+        };
+      })
     );
-    runDb(updateOrderItemsDoc(uid, orderId, nextItems));
   };
 
   const handleConfirmPack = (orderId: string) => {
@@ -595,35 +602,49 @@ export default function App() {
       deductionsByProduct.set(prod.id, entry);
     });
 
-    deductionsByProduct.forEach((deduction, prodId) => {
-      const prod = products.find((p) => p.id === prodId);
-      if (!prod) return;
-      const nextStock = Math.max(0, prod.stock - deduction.totalQty);
-      const updatedColors = prod.colors?.map((c) => {
-        const colorDeduct = deduction.byColor.get(c.name) ?? 0;
-        if (colorDeduct > 0 && typeof c.stock === "number") {
-          return { ...c, stock: Math.max(0, c.stock - colorDeduct) };
-        }
-        return c;
-      });
-      runDb(
-        updateProductDoc(uid, prod.id, {
+    setProducts((prev) =>
+      prev.map((prod) => {
+        const deduction = deductionsByProduct.get(prod.id);
+        if (!deduction) return prod;
+        const nextStock = Math.max(0, prod.stock - deduction.totalQty);
+        const updatedColors = prod.colors?.map((c) => {
+          const colorDeduct = deduction.byColor.get(c.name) ?? 0;
+          if (colorDeduct > 0 && typeof c.stock === "number") {
+            return { ...c, stock: Math.max(0, c.stock - colorDeduct) };
+          }
+          return c;
+        });
+        return {
+          ...prod,
           stock: nextStock,
           ...(updatedColors ? { colors: updatedColors } : {}),
-          updatedAtLabel: "ตัดสต็อกอัตโนมัติ",
-        })
-      );
-    });
+          updatedAt: "ตัดสต็อกอัตโนมัติ",
+        };
+      })
+    );
 
-    const pickedItems = order.items.map((i) => ({ ...i, picked: true }));
-    runDb(packOrderDoc(uid, orderId, pickedItems));
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: "packing",
+              items: o.items.map((i) => ({ ...i, picked: true })),
+            }
+          : o
+      )
+    );
     showToast(`แพ็ค #${orderId} สำเร็จ — ตัดสต็อกอัตโนมัติแล้ว`, "check_circle");
   };
 
   const handleMarkReadyToShip = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order || order.status !== "packing") return;
-    runDb(markOrderReadyToShipDoc(uid, orderId));
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId ? { ...o, status: "ready_to_ship" } : o
+      )
+    );
     showToast(`ออเดอร์ #${orderId} พร้อมจัดส่งแล้ว (สถานะรอจัดส่ง)`, "outbox");
   };
 
@@ -645,13 +666,17 @@ export default function App() {
         `TH${Math.floor(100000000 + Math.random() * 900000000)}A`
       : options.trackingCode;
 
-    runDb(
-      confirmOrderShipDoc(uid, orderId, {
-        shippingOption: options.shippingOption,
-        carrierName: options.carrierName,
-        courier: options.courier,
-        trackingCode: tracking,
-      })
+    const updatedOrder: Order = {
+      ...targetOrder,
+      status: "shipped",
+      shippingOption: options.shippingOption,
+      carrierName: options.carrierName,
+      courier: options.courier,
+      trackingCode: tracking,
+    };
+
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? updatedOrder : o))
     );
 
     const toastSummary =
@@ -662,14 +687,7 @@ export default function App() {
           : `จัดส่ง #${orderId} แล้ว (${options.carrierName || options.courier || "ขนส่ง"}: ${tracking})`;
 
     showToast(toastSummary, "local_shipping");
-    setConfirmingDeliveryOrder({
-      ...targetOrder,
-      status: "shipped",
-      shippingOption: options.shippingOption,
-      carrierName: options.carrierName,
-      courier: options.courier,
-      trackingCode: tracking,
-    });
+    setConfirmingDeliveryOrder(updatedOrder);
   };
 
   const handleConfirmDelivery = (payload: {
@@ -683,12 +701,22 @@ export default function App() {
       hour: "2-digit",
       minute: "2-digit",
     });
-    runDb(
-      confirmOrderDeliveryDoc(uid, {
-        ...payload,
-        confirmedAt: confirmedTime,
-      })
+
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === payload.orderId
+          ? {
+              ...o,
+              deliveryConfirmationMethod: payload.method,
+              deliveryProofImage: payload.proofImage,
+              cashReceivedThb: payload.cashReceivedThb,
+              deliveryNote: payload.note,
+              deliveryConfirmedAt: confirmedTime,
+            }
+          : o
+      )
     );
+
     showToast(
       payload.method === "cash"
         ? `บันทึกชำระเงินสด #${payload.orderId} เรียบร้อยแล้ว`
@@ -707,7 +735,7 @@ export default function App() {
       (sum, i) => sum + i.quantity * i.unitPriceThb,
       0
     );
-    const newId = sanitizeDocId(`ORD-${Math.floor(202504 + Math.random() * 8000)}`);
+    const newId = `ORD-${Math.floor(202504 + Math.random() * 8000)}`;
     const newOrder: Order = {
       id: newId,
       ...(customerId ? { customerId } : {}),
@@ -721,8 +749,9 @@ export default function App() {
       }),
       items,
     };
-    runDb(createOrderDoc(uid, newOrder));
+    setOrders((prev) => [newOrder, ...prev]);
     setPreselectedOrderCustomer(null);
+    setPreselectedOrderProduct(null);
     setActiveOrderTab("pending");
     setActiveTab("orders");
     const typeLabel = orderType === "walk_in" ? "Walk-in" : "ส่งของ";
@@ -735,10 +764,16 @@ export default function App() {
   };
 
   const handleCreateCustomer = (data: Omit<Customer, "id" | "createdAt">) => {
-    const newId = sanitizeDocId(
-      `cust-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`
-    );
-    runDb(createCustomerDoc(uid, newId, data));
+    const newCustomer: Customer = {
+      ...data,
+      id: makeId("cust"),
+      createdAt: new Date().toLocaleDateString("th-TH", {
+        day: "numeric",
+        month: "short",
+        year: "2-digit",
+      }),
+    };
+    setCustomers((prev) => [newCustomer, ...prev]);
     showToast(`เพิ่มลูกค้า "${data.name}" เรียบร้อยแล้ว`, "person_add");
   };
 
@@ -746,22 +781,27 @@ export default function App() {
     customerId: string,
     updates: Omit<Customer, "id" | "createdAt">
   ) => {
-    runDb(
-      updateCustomerDoc(uid, customerId, {
-        name: updates.name,
-        phone: updates.phone || "",
-        lineId: updates.lineId || "",
-        email: updates.email || "",
-        address: updates.address || "",
-        note: updates.note || "",
-      })
+    setCustomers((prev) =>
+      prev.map((c) =>
+        c.id === customerId
+          ? {
+              ...c,
+              name: updates.name,
+              phone: updates.phone || "",
+              lineId: updates.lineId || "",
+              email: updates.email || "",
+              address: updates.address || "",
+              note: updates.note || "",
+            }
+          : c
+      )
     );
     showToast(`อัปเดตข้อมูล "${updates.name}" แล้ว`, "save");
   };
 
   const handleDeleteCustomer = (customerId: string) => {
     const target = customers.find((c) => c.id === customerId);
-    runDb(deleteCustomerDoc(uid, customerId));
+    setCustomers((prev) => prev.filter((c) => c.id !== customerId));
     showToast(
       `ลบลูกค้า "${target?.name || ""}" ออกจากรายชื่อแล้ว`,
       "person_remove"
@@ -769,21 +809,18 @@ export default function App() {
   };
 
   const handleImportOrderCustomers = (names: string[]) => {
-    names.forEach((name, idx) => {
-      const newId = sanitizeDocId(
-        `cust-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`
-      );
-      runDb(createCustomerDoc(uid, newId, { name }));
+    const createdAt = new Date().toLocaleDateString("th-TH", {
+      day: "numeric",
+      month: "short",
+      year: "2-digit",
     });
+    const imported: Customer[] = names.map((name, idx) => ({
+      id: `${makeId("cust")}-${idx}`,
+      name,
+      createdAt,
+    }));
+    setCustomers((prev) => [...imported, ...prev]);
     showToast(`นำเข้าลูกค้าจากออเดอร์เดิม ${names.length} รายแล้ว`, "group_add");
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await signOutUser();
-    } catch {
-      showToast("ไม่สามารถออกจากระบบได้ กรุณาลองใหม่", "error");
-    }
   };
 
   return (
@@ -805,13 +842,13 @@ export default function App() {
         }}
         notifications={notifications}
         onMarkAllRead={() => {
-          notifications
-            .filter((n) => !n.read)
-            .forEach((n) => runDb(markNotificationReadDoc(uid, n.id)));
+          setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
         }}
         onSelectNotification={(noti) => {
           if (!noti.read) {
-            runDb(markNotificationReadDoc(uid, noti.id));
+            setNotifications((prev) =>
+              prev.map((n) => (n.id === noti.id ? { ...n, read: true } : n))
+            );
           }
           if (noti.type === "order") setActiveTab("orders");
           else if (noti.type === "stock") setActiveTab("inventory");
@@ -826,25 +863,13 @@ export default function App() {
             invoice={invoice}
             onUpdateInvoice={setInvoice}
             exchangeRate={exchangeRate}
-            onExchangeRateChange={(val) => {
-              setExchangeRate(val);
-              runDb(updateWorkspaceSettings(uid, { exchangeRate: val }));
-            }}
+            onExchangeRateChange={setExchangeRate}
             freightCost={freightCost}
-            onFreightCostChange={(val) => {
-              setFreightCost(val);
-              runDb(updateWorkspaceSettings(uid, { freightCost: val }));
-            }}
+            onFreightCostChange={setFreightCost}
             splitByQty={splitByQty}
-            onSplitByQtyChange={(val) => {
-              setSplitByQty(val);
-              runDb(updateWorkspaceSettings(uid, { splitByQty: val }));
-            }}
+            onSplitByQtyChange={setSplitByQty}
             autoSave={autoSave}
-            onAutoSaveChange={(val) => {
-              setAutoSave(val);
-              runDb(updateWorkspaceSettings(uid, { autoSave: val }));
-            }}
+            onAutoSaveChange={setAutoSave}
             pendingCount={pendingOrdersCount}
             packingCount={packingOrdersCount}
             readyToShipCount={readyToShipOrdersCount}
@@ -873,7 +898,7 @@ export default function App() {
             lastSyncedLabel={lastSyncedLabel}
             onSyncNow={() => {
               stampSynced();
-              showToast("ซิงก์ข้อมูลสต็อกกับ Cloud Firestore แล้ว", "cloud_done");
+              showToast("บันทึกข้อมูลสต็อกลงเครื่องเรียบร้อยแล้ว", "save");
             }}
             onQuickCreateOrder={handleQuickCreateOrder}
             onQuickCreateOrderForProduct={handleQuickCreateOrderForProduct}
@@ -925,14 +950,15 @@ export default function App() {
           <OwnerAuthView
             role={role}
             ownerName={ownerName}
-            userEmail={user.email}
             onUpdateOwnerName={(newName) => {
               setOwnerName(newName);
-              runDb(updateWorkspaceSettings(uid, { ownerName: newName }));
               showToast(`อัปเดตชื่อเจ้าของร้านเป็น "${newName}" แล้ว`, "badge");
             }}
-            onSignOut={handleSignOut}
-            ownerPin="123456"
+            ownerPin={ownerPin}
+            onChangeOwnerPin={(newPin) => {
+              setOwnerPin(newPin);
+              showToast("เปลี่ยนรหัสผ่านเจ้าของร้านเรียบร้อยแล้ว", "key");
+            }}
             pendingCount={pendingOrdersCount}
             packingCount={packingOrdersCount}
             readyToShipCount={readyToShipOrdersCount}
@@ -1033,7 +1059,7 @@ export default function App() {
         <DeliveryConfirmModal
           order={confirmingDeliveryOrder}
           canEdit={
-            isBootstrappedAdmin || !confirmingDeliveryOrder.deliveryConfirmedAt
+            role === "owner" || !confirmingDeliveryOrder.deliveryConfirmedAt
           }
           onClose={() => setConfirmingDeliveryOrder(null)}
           onConfirm={handleConfirmDelivery}

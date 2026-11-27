@@ -115,7 +115,7 @@ export function InventoryView({
             <div className="h-7 w-px bg-surface-container hidden sm:block" />
             <div className="min-w-0 hidden sm:block">
               <p className="text-[11px] text-on-surface-variant">
-                ซิงก์คลาวด์อัตโนมัติ
+                บันทึกข้อมูลอัตโนมัติ
               </p>
               <p className="text-[12px] font-semibold text-primary tabular-nums truncate">
                 ล่าสุด {lastSyncedLabel}
@@ -135,7 +135,7 @@ export function InventoryView({
             >
               sync
             </span>
-            <span>ซิงก์ทันที</span>
+            <span>บันทึกทันที</span>
           </button>
         </div>
       </div>
@@ -340,7 +340,7 @@ export function InventoryView({
               save_as
             </span>
             <span className="text-[11px] text-on-surface-variant truncate">
-              ซิงก์และบันทึกอัตโนมัติเมื่อเพิ่มสินค้า/แก้ไข
+              บันทึกข้อมูลลงเครื่องอัตโนมัติเมื่อเพิ่มสินค้า/แก้ไข
             </span>
           </div>
           <span className="text-[11px] text-primary shrink-0 flex items-center gap-0.5 font-medium">

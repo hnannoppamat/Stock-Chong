@@ -4,10 +4,9 @@ import { RoleMode, StockApprovalRequest } from "../types";
 interface OwnerAuthViewProps {
   role: RoleMode;
   ownerName: string;
-  userEmail?: string | null;
   onUpdateOwnerName: (name: string) => void;
-  onSignOut: () => void;
   ownerPin: string;
+  onChangeOwnerPin: (newPin: string) => void;
   pendingCount: number;
   packingCount: number;
   readyToShipCount: number;
@@ -24,10 +23,9 @@ interface OwnerAuthViewProps {
 export function OwnerAuthView({
   role,
   ownerName,
-  userEmail,
   onUpdateOwnerName,
-  onSignOut,
   ownerPin,
+  onChangeOwnerPin,
   pendingCount,
   packingCount,
   readyToShipCount,
@@ -40,20 +38,38 @@ export function OwnerAuthView({
   onApproveStockRequest,
   onNotify,
 }: OwnerAuthViewProps) {
-  const [selectedTab, setSelectedTab] = useState<RoleMode>(role);
+  // Always open on the Owner tab so tapping "เข้าเจ้าของร้าน" shows the PIN keypad immediately
+  const [selectedTab, setSelectedTab] = useState<RoleMode>("owner");
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(ownerName);
 
-  useEffect(() => {
-    setSelectedTab(role);
-  }, [role]);
   const [pinInput, setPinInput] = useState("");
   const [pinStatus, setPinStatus] = useState(
-    "กรุณากรอกรหัส PIN 6 หลักเพื่อเข้าถึงข้อมูลต้นทุน (PIN: 123456)"
+    ownerPin === "123456"
+      ? "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน (รหัสเริ่มต้น: 123456)"
+      : "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน"
   );
   const [pinStatusType, setPinStatusType] = useState<
     "neutral" | "success" | "error" | "info"
   >("neutral");
+
+  // Change PIN form state (Owner only)
+  const [showChangePin, setShowChangePin] = useState(false);
+  const [currentPinDraft, setCurrentPinDraft] = useState("");
+  const [newPinDraft, setNewPinDraft] = useState("");
+  const [confirmPinDraft, setConfirmPinDraft] = useState("");
+  const [changePinError, setChangePinError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (role === "staff") {
+      setPinStatus(
+        ownerPin === "123456"
+          ? "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน (รหัสเริ่มต้น: 123456)"
+          : "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน"
+      );
+      setPinStatusType("neutral");
+    }
+  }, [role, ownerPin]);
 
   const handleSaveOwnerName = (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,34 +83,42 @@ export function OwnerAuthView({
     (r) => r.status === "pending"
   );
 
+  const submitPinCandidate = (nextPin: string) => {
+    setPinStatus("กำลังตรวจสอบรหัสผ่าน...");
+    setPinStatusType("info");
+    setTimeout(() => {
+      if (nextPin === ownerPin) {
+        setPinStatus("ปลดล็อกโหมดเจ้าของร้านสำเร็จ");
+        setPinStatusType("success");
+        onAuthenticateOwner();
+        setTimeout(() => {
+          setPinInput("");
+          setPinStatus(
+            "ยืนยันรหัสเจ้าของร้านแล้ว — เข้าถึงต้นทุนและอนุมัติสต็อกได้เต็มรูปแบบ"
+          );
+        }, 650);
+      } else {
+        setPinStatus(
+          ownerPin === "123456"
+            ? "รหัสผ่านไม่ถูกต้อง (รหัสเริ่มต้นคือ 123456)"
+            : "รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง"
+        );
+        setPinStatusType("error");
+        onNotify("รหัสผ่านไม่ถูกต้อง", "error");
+        setTimeout(() => {
+          setPinInput("");
+        }, 650);
+      }
+    }, 240);
+  };
+
   const handleDigitPress = (digit: string) => {
     if (pinInput.length >= 6) return;
     const nextPin = pinInput + digit;
     setPinInput(nextPin);
 
     if (nextPin.length === 6) {
-      setPinStatus("กำลังตรวจสอบรหัส PIN...");
-      setPinStatusType("info");
-      setTimeout(() => {
-        if (nextPin === ownerPin) {
-          setPinStatus("เข้าสู่ระบบโหมดเจ้าของร้านสำเร็จ");
-          setPinStatusType("success");
-          onAuthenticateOwner();
-          setTimeout(() => {
-            setPinInput("");
-            setPinStatus(
-              "ยืนยันตัวตนเจ้าของร้านแล้ว — เข้าถึงต้นทุนและอนุมัติสต็อกได้เต็มรูปแบบ"
-            );
-          }, 800);
-        } else {
-          setPinStatus("รหัส PIN ไม่ถูกต้อง (ลองใช้รหัสเริ่มต้น 123456)");
-          setPinStatusType("error");
-          onNotify("รหัส PIN ไม่ถูกต้อง", "error");
-          setTimeout(() => {
-            setPinInput("");
-          }, 700);
-        }
-      }, 300);
+      submitPinCandidate(nextPin);
     }
   };
 
@@ -104,24 +128,83 @@ export function OwnerAuthView({
     }
   };
 
-  const handleBiometric = () => {
-    setPinStatus("กำลังสแกน Face ID...");
-    setPinStatusType("info");
-    setTimeout(() => {
-      setPinInput("123456");
-      setPinStatus("ยืนยันตัวตนด้วย Face ID สำเร็จ");
-      setPinStatusType("success");
-      onAuthenticateOwner();
-      setTimeout(() => {
-        setPinInput("");
-      }, 900);
-    }, 500);
+  const handleClearPin = () => {
+    setPinInput("");
+    setPinStatus(
+      ownerPin === "123456"
+        ? "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน (รหัสเริ่มต้น: 123456)"
+        : "กรอกรหัสผ่าน 6 หลักเพื่อเข้าโหมดเจ้าของร้าน"
+    );
+    setPinStatusType("neutral");
   };
 
+  // Allow keyboard number entry when the Owner PIN keypad is displayed
+  useEffect(() => {
+    if (role !== "staff" || selectedTab !== "owner") return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        setPinInput((prev) => {
+          if (prev.length >= 6) return prev;
+          const next = prev + e.key;
+          if (next.length === 6) {
+            submitPinCandidate(next);
+          }
+          return next;
+        });
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        setPinInput((prev) => prev.slice(0, -1));
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setPinInput("");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [role, selectedTab, ownerPin]);
+
   const handleForgotPin = () => {
-    setPinStatus(`รหัส PIN เริ่มต้นสำหรับเข้าใช้งานคือ ${ownerPin}`);
-    setPinStatusType("info");
-    onNotify(`รหัสกู้คืน PIN: ${ownerPin}`, "key");
+    if (ownerPin === "123456") {
+      setPinStatus("รหัสผ่านเริ่มต้นสำหรับเจ้าของร้านคือ 123456");
+      setPinStatusType("info");
+      onNotify("รหัสผ่านเริ่มต้น: 123456", "key");
+    } else {
+      setPinStatus("กรุณาติดต่อเจ้าของร้านเพื่อขอรหัสผ่าน 6 หลัก");
+      setPinStatusType("info");
+      onNotify("กรุณาติดต่อเจ้าของร้านเพื่อขอรหัสผ่าน", "key");
+    }
+  };
+
+  const handleSaveNewPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePinError(null);
+    if (currentPinDraft !== ownerPin) {
+      setChangePinError("รหัสผ่านปัจจุบันไม่ถูกต้อง");
+      return;
+    }
+    if (!/^\d{6}$/.test(newPinDraft)) {
+      setChangePinError("กรุณากรอกรหัสผ่านใหม่เป็นตัวเลข 6 หลัก");
+      return;
+    }
+    if (newPinDraft !== confirmPinDraft) {
+      setChangePinError("ยืนยันรหัสผ่านใหม่ไม่ตรงกัน");
+      return;
+    }
+    onChangeOwnerPin(newPinDraft);
+    setCurrentPinDraft("");
+    setNewPinDraft("");
+    setConfirmPinDraft("");
+    setShowChangePin(false);
   };
 
   return (
@@ -202,11 +285,6 @@ export function OwnerAuthView({
         </div>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          {userEmail && (
-            <span className="text-[11px] text-on-surface-variant hidden sm:inline truncate max-w-[180px]">
-              {userEmail}
-            </span>
-          )}
           <span
             className={`px-3 py-1 rounded-full text-[11px] font-semibold shrink-0 ${
               role === "staff"
@@ -216,14 +294,6 @@ export function OwnerAuthView({
           >
             {role === "staff" ? "สิทธิ์พนักงาน" : "สิทธิ์เจ้าของร้าน"}
           </span>
-          <button
-            type="button"
-            onClick={onSignOut}
-            className="h-8 px-2.5 rounded-lg bg-surface-container-low hover:bg-error-container/40 text-on-surface-variant hover:text-error text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[15px]">logout</span>
-            <span>ออกจากระบบ</span>
-          </button>
         </div>
       </div>
 
@@ -361,7 +431,7 @@ export function OwnerAuthView({
         <div className="lg:col-span-6">
           {selectedTab === "owner" ? (
             role === "owner" ? (
-              <div className="bg-surface-container-lowest rounded-xl p-5 shadow-sm flex flex-col gap-4">
+              <div className="bg-surface-container-lowest rounded-xl p-5 shadow-sm flex flex-col gap-4 border border-outline-variant/30">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0">
@@ -378,6 +448,99 @@ export function OwnerAuthView({
                       </p>
                     </div>
                   </div>
+                </div>
+
+                {/* Change Owner PIN Section */}
+                <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[17px] text-primary">
+                        pin
+                      </span>
+                      <span className="text-[13px] font-semibold text-on-surface">
+                        รหัสผ่านเข้าโหมดเจ้าของร้าน (6 หลัก)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowChangePin((prev) => !prev);
+                        setChangePinError(null);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-primary-fixed text-on-primary-fixed text-[11px] font-semibold hover:bg-primary hover:text-on-primary transition-colors cursor-pointer"
+                    >
+                      {showChangePin ? "ปิด" : "เปลี่ยนรหัส"}
+                    </button>
+                  </div>
+
+                  {showChangePin && (
+                    <form
+                      onSubmit={handleSaveNewPin}
+                      className="flex flex-col gap-2.5 pt-1 border-t border-outline-variant/25"
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[11px] text-on-surface-variant">
+                            รหัสเดิม (6 หลัก)
+                          </span>
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={currentPinDraft}
+                            onChange={(e) =>
+                              setCurrentPinDraft(e.target.value.replace(/\D/g, ""))
+                            }
+                            placeholder="••••••"
+                            className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-semibold tracking-widest text-on-surface focus:outline-none focus:border-primary"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[11px] text-on-surface-variant">
+                            รหัสใหม่ (6 หลัก)
+                          </span>
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={newPinDraft}
+                            onChange={(e) =>
+                              setNewPinDraft(e.target.value.replace(/\D/g, ""))
+                            }
+                            placeholder="••••••"
+                            className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-semibold tracking-widest text-on-surface focus:outline-none focus:border-primary"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[11px] text-on-surface-variant">
+                            ยืนยันรหัสใหม่
+                          </span>
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={confirmPinDraft}
+                            onChange={(e) =>
+                              setConfirmPinDraft(e.target.value.replace(/\D/g, ""))
+                            }
+                            placeholder="••••••"
+                            className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-semibold tracking-widest text-on-surface focus:outline-none focus:border-primary"
+                          />
+                        </label>
+                      </div>
+                      {changePinError && (
+                        <p className="text-[12px] text-error font-medium">
+                          {changePinError}
+                        </p>
+                      )}
+                      <button
+                        type="submit"
+                        className="h-9 rounded-lg bg-primary text-on-primary text-[12px] font-semibold cursor-pointer hover:bg-primary-dim"
+                      >
+                        บันทึกรหัสผ่านใหม่
+                      </button>
+                    </form>
+                  )}
                 </div>
 
                 {/* Pending Stock Approvals from Staff */}
@@ -442,19 +605,19 @@ export function OwnerAuthView({
                   type="button"
                   onClick={() => {
                     onSwitchToStaff();
-                    setSelectedTab("staff");
+                    setSelectedTab("owner");
                   }}
                   className="w-full h-11 rounded-xl bg-secondary text-on-secondary font-semibold text-[13px] flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[18px]">
-                    badge
+                    lock
                   </span>
-                  <span>สลับให้พนักงานเข้าใช้งาน (ล็อกสิทธิ์เจ้าของร้าน)</span>
+                  <span>ล็อกกลับเป็นโหมดพนักงาน</span>
                 </button>
               </div>
             ) : (
               /* Owner PIN Keypad Section */
-              <div className="bg-surface-container-lowest rounded-xl p-5 shadow-sm flex flex-col items-center gap-4">
+              <div className="bg-surface-container-lowest rounded-xl p-5 shadow-sm border border-outline-variant/30 flex flex-col items-center gap-4">
                 <div className="flex flex-col items-center text-center gap-1">
                   <div className="w-12 h-12 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center mb-1">
                     <span className="material-symbols-outlined material-symbols-filled text-[24px]">
@@ -462,7 +625,7 @@ export function OwnerAuthView({
                     </span>
                   </div>
                   <h2 className="text-[18px] font-semibold text-on-surface">
-                    ยืนยันตัวตนเจ้าของร้าน
+                    ใส่รหัสผ่านเจ้าของร้าน
                   </h2>
                   <p
                     className={`text-[13px] ${
@@ -481,7 +644,7 @@ export function OwnerAuthView({
 
                 {/* 6-Digit PIN Dots */}
                 <div
-                  aria-label="รหัส PIN 6 หลัก"
+                  aria-label="รหัสผ่าน 6 หลัก"
                   className="flex items-center justify-center gap-3.5 py-2"
                 >
                   {[0, 1, 2, 3, 4, 5].map((idx) => (
@@ -511,13 +674,11 @@ export function OwnerAuthView({
 
                   <button
                     type="button"
-                    aria-label="สแกนใบหน้า Face ID"
-                    onClick={handleBiometric}
-                    className="h-14 rounded-xl bg-primary-fixed/60 text-on-primary-fixed flex items-center justify-center active:scale-95 transition-all duration-150 cursor-pointer hover:bg-primary-fixed"
+                    aria-label="ล้างรหัส"
+                    onClick={handleClearPin}
+                    className="h-14 rounded-xl bg-surface-container-low text-on-surface-variant text-[13px] font-semibold flex items-center justify-center active:scale-95 transition-all duration-150 cursor-pointer hover:bg-surface-container"
                   >
-                    <span className="material-symbols-outlined text-[26px]">
-                      face
-                    </span>
+                    ล้าง
                   </button>
 
                   <button
@@ -545,29 +706,13 @@ export function OwnerAuthView({
                   onClick={handleForgotPin}
                   className="text-[12px] font-medium text-primary py-2 px-4 rounded-lg hover:bg-primary-fixed/30 transition-colors min-h-[44px] flex items-center justify-center cursor-pointer"
                 >
-                  ลืมรหัส PIN?
+                  ลืมรหัสผ่าน?
                 </button>
-
-                <div className="w-full pt-2 border-t border-surface-container">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSwitchToStaff();
-                      setSelectedTab("staff");
-                    }}
-                    className="w-full h-12 rounded-xl bg-secondary text-on-secondary font-semibold text-[14px] flex items-center justify-center gap-2 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">
-                      badge
-                    </span>
-                    <span>พนักงานเข้าใช้งาน (ไม่ต้องใช้รหัส PIN)</span>
-                  </button>
-                </div>
               </div>
             )
           ) : (
             /* Staff Quick Switch Section */
-            <div className="bg-surface-container-lowest rounded-xl p-5 shadow-sm flex flex-col items-center text-center gap-4">
+            <div className="bg-surface-container-lowest rounded-xl p-5 shadow-sm border border-outline-variant/30 flex flex-col items-center text-center gap-4">
               <div className="w-12 h-12 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center">
                 <span className="material-symbols-outlined material-symbols-filled text-[24px]">
                   storefront
@@ -575,10 +720,10 @@ export function OwnerAuthView({
               </div>
               <div className="flex flex-col gap-1">
                 <h2 className="text-[18px] font-semibold text-on-surface">
-                  สลับเป็นโหมดพนักงาน
+                  โหมดพนักงานหน้าร้าน
                 </h2>
                 <p className="text-[13px] text-on-surface-variant">
-                  ไม่ต้องใช้รหัส PIN สามารถจัดการคลังสินค้าและออเดอร์หน้าร้านได้ทันที
+                  ไม่ต้องใช้รหัสผ่าน สามารถจัดการคลังสินค้าและออเดอร์หน้าร้านได้ทันที
                 </p>
               </div>
               <button
@@ -587,12 +732,12 @@ export function OwnerAuthView({
                 className="w-full h-12 rounded-xl bg-secondary text-on-secondary font-semibold text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-sm cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[20px]">
-                  {role === "staff" ? "check_circle" : "login"}
+                  {role === "staff" ? "check_circle" : "badge"}
                 </span>
                 <span>
                   {role === "staff"
                     ? "กำลังใช้งานโหมดพนักงานอยู่"
-                    : "เข้าใช้งานโหมดพนักงานทันที"}
+                    : "สลับเป็นโหมดพนักงานทันที"}
                 </span>
               </button>
             </div>
@@ -633,7 +778,7 @@ export function OwnerAuthView({
                   )}
                 </div>
                 <p className="text-[13px] text-on-surface-variant mt-0.5">
-                  เพิ่มสินค้าใหม่, จัดการออเดอร์, ถ่ายรูปยืนยันจัดส่ง (ไม่เห็นต้นทุนและเรทเงิน)
+                  เปิดใช้งานได้ทันทีโดยไม่ต้องใส่รหัส: เพิ่มสินค้า, จัดการออเดอร์, ถ่ายรูปยืนยันจัดส่ง (ซ่อนต้นทุนและเรทเงิน)
                 </p>
               </div>
             </div>
@@ -660,7 +805,7 @@ export function OwnerAuthView({
                   )}
                 </div>
                 <p className="text-[13px] text-on-surface-variant mt-0.5">
-                  อัปโหลดและสแกนบิล, ดูต้นทุนจริง, ตั้งค่าเรทเงิน, อนุมัติ/แก้ไขจำนวนสต็อกได้เต็มรูปแบบ
+                  ปลดล็อกด้วยรหัสผ่าน 6 หลัก: อัปโหลดและสแกนบิล, ดูต้นทุนจริง, ตั้งค่าเรทเงิน, อนุมัติ/แก้ไขจำนวนสต็อกได้เต็มรูปแบบ
                 </p>
               </div>
             </div>
