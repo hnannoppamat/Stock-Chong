@@ -20,7 +20,6 @@ interface MultiDeviceModalProps {
     accounting: number;
   };
   onRenameDevice: (nextName: string) => void;
-  onConnectCloud: () => void;
   onDisconnectCloud: () => void;
   onSyncAllToCloud?: () => void;
   onNotify: (msg: string, icon?: string) => void;
@@ -37,7 +36,6 @@ export function MultiDeviceModal({
   isSyncingCloudAll = false,
   cloudRecordCounts,
   onRenameDevice,
-  onConnectCloud,
   onDisconnectCloud,
   onSyncAllToCloud,
   onNotify,
@@ -268,7 +266,7 @@ export function MultiDeviceModal({
             </div>
           </div>
 
-          {/* Permanent Google Cloud Backup (Firebase Firestore) */}
+          {/* Permanent Cloud Backup (Firebase Firestore) */}
           <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-2.5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -276,30 +274,21 @@ export function MultiDeviceModal({
                   <span className="material-symbols-outlined text-[17px] text-secondary">
                     {cloudStatus === "connected" ? "cloud_done" : "cloud_upload"}
                   </span>
-                  ฐานข้อมูล Google Cloud (Firebase Firestore)
+                  ฐานข้อมูลคลาวด์ (Firebase Firestore)
                 </p>
                 <p className="text-[11.5px] text-on-surface-variant truncate mt-0.5">
                   {cloudStatus === "connected"
-                    ? `เชื่อมและบันทึกอัตโนมัติที่ ${cloudUserEmail || "Google Cloud"}`
-                    : "เชื่อมบัญชี Google เพื่อบันทึกและเชื่อมข้อมูลร้านทั้งหมดขึ้น Google Cloud ถาวร"}
+                    ? `เชื่อมและบันทึกอัตโนมัติที่บัญชี ${cloudUserEmail || "ร้านค้า"}`
+                    : "กำลังเชื่อมต่อฐานข้อมูลคลาวด์ของบัญชีร้าน"}
                 </p>
               </div>
-              {cloudStatus === "connected" ? (
+              {cloudStatus === "connected" && (
                 <button
                   type="button"
                   onClick={onDisconnectCloud}
                   className="px-3 py-1.5 rounded-lg border border-outline-variant/60 text-[12px] font-semibold text-on-surface-variant hover:bg-error-container hover:text-on-error-container transition-colors shrink-0 cursor-pointer"
                 >
-                  ตัดคลาวด์
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onConnectCloud}
-                  disabled={cloudStatus === "connecting"}
-                  className="px-3 py-1.5 rounded-lg bg-secondary text-on-secondary text-[12px] font-semibold hover:opacity-90 transition-opacity shrink-0 disabled:opacity-60 cursor-pointer"
-                >
-                  {cloudStatus === "connecting" ? "กำลังเชื่อม..." : "เชื่อม Google Cloud"}
+                  ออกจากระบบ
                 </button>
               )}
             </div>
@@ -349,8 +338,8 @@ export function MultiDeviceModal({
                 </span>
                 <span>
                   {isSyncingCloudAll
-                    ? "กำลังบันทึกข้อมูลทุกอย่างขึ้น Google Cloud..."
-                    : "บันทึกและซิงก์ข้อมูลทุกอย่างขึ้น Google Cloud"}
+                    ? "กำลังบันทึกข้อมูลทุกอย่างขึ้นคลาวด์..."
+                    : "บันทึกและซิงก์ข้อมูลทุกอย่างขึ้นคลาวด์"}
                 </span>
               </button>
             )}

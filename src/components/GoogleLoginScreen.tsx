@@ -1,29 +1,6 @@
 import { FormEvent, useState } from "react";
 import { FIREBASE_AUTH_PROVIDERS_URL } from "../firebase";
 
-export function GoogleLogoSvg({ className = "w-5 h-5" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        fill="#4285F4"
-        d="M23.49 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.08 3.56-5.15 3.56-8.65z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.87-3c-1.07.72-2.44 1.15-4.06 1.15-3.12 0-5.77-2.11-6.71-4.95H1.29v3.1A12 12 0 0 0 12 24z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.29 14.29A7.18 7.18 0 0 1 4.91 12c0-.79.14-1.56.38-2.29V6.61H1.29A12 12 0 0 0 0 12c0 1.94.46 3.77 1.29 5.39l4-3.1z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 4.75c1.76 0 3.34.61 4.59 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.29 6.61l4 3.1C6.23 6.86 8.88 4.75 12 4.75z"
-      />
-    </svg>
-  );
-}
-
 interface GoogleLoginScreenProps {
   isSigningIn: boolean;
   errorMessage: string | null;
@@ -34,7 +11,6 @@ interface GoogleLoginScreenProps {
     password: string,
     storeName?: string
   ) => Promise<void>;
-  onSignInWithGoogle: () => Promise<void>;
   onClearError?: () => void;
 }
 
@@ -44,7 +20,6 @@ export function GoogleLoginScreen({
   providerDisabled = false,
   onSignInWithPassword,
   onRegisterWithPassword,
-  onSignInWithGoogle,
   onClearError,
 }: GoogleLoginScreenProps) {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -92,18 +67,6 @@ export function GoogleLoginScreen({
       } else {
         await onRegisterWithPassword(cleanUser, password, storeName.trim());
       }
-    } finally {
-      setLocalBusy(false);
-    }
-  };
-
-  const handleGoogleClick = async () => {
-    if (busy) return;
-    setLocalError(null);
-    onClearError?.();
-    setLocalBusy(true);
-    try {
-      await onSignInWithGoogle();
     } finally {
       setLocalBusy(false);
     }
@@ -334,25 +297,6 @@ export function GoogleLoginScreen({
             <span>ข้อมูลผูกเฉพาะบัญชีนี้ บัญชีอื่นไม่สามารถเข้ามาดูข้อมูลร้านของคุณได้</span>
           </div>
         </div>
-
-        {/* Divider + Google Sign-In fallback */}
-        <div className="w-full flex items-center gap-3">
-          <div className="h-px flex-1 bg-outline-variant/50" />
-          <span className="text-[11.5px] font-medium text-on-surface-variant">
-            หรือเข้าสู่ระบบด้วยบัญชี Google เดิม
-          </span>
-          <div className="h-px flex-1 bg-outline-variant/50" />
-        </div>
-
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void handleGoogleClick()}
-          className="w-full min-h-[44px] px-4 rounded-2xl bg-white hover:bg-surface-container-low text-[#1f1f1f] font-semibold text-[13.5px] border border-outline-variant shadow-xs flex items-center justify-center gap-2.5 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-65 disabled:cursor-not-allowed"
-        >
-          <GoogleLogoSvg className="w-4 h-4 shrink-0" />
-          <span>เข้าสู่ระบบด้วย Google</span>
-        </button>
 
         <div className="w-full pt-1 border-t border-outline-variant/30 text-center">
           {mode === "login" ? (

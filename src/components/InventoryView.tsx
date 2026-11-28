@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Order, ProductItem, RoleMode } from "../types";
 import { exportStockAndSalesReportCsv } from "../utils/csvExport";
 import { ResilientImage } from "./ResilientImage";
@@ -30,6 +30,39 @@ interface InventoryViewProps {
   onDeleteCategory: (categoryName: string) => void;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeSkuText(value: string): string {
+  return value.toLowerCase().replace(/[\s\-_]+/g, "");
+}
+
+function renderHighlightedText(text: string, query: string): ReactNode {
+  const tokens = query
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+  if (tokens.length === 0) return text;
+
+  const pattern = new RegExp(`(${tokens.map(escapeRegExp).join("|")})`, "gi");
+  const parts = text.split(pattern);
+  if (parts.length <= 1) return text;
+
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? (
+      <mark
+        key={idx}
+        className="bg-primary-fixed/85 text-on-primary-fixed rounded-xs px-0.5 font-semibold"
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+}
+
 export function InventoryView({
   role,
   products,
@@ -49,6 +82,7 @@ export function InventoryView({
   onDeleteCategory,
 }: InventoryViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [stockFilter, setStockFilter] = useState<StockFilterMode>(
     initialStockFilter || "all"
   );
@@ -74,6 +108,26 @@ export function InventoryView({
       onConsumeInitialFilter?.();
     }
   }, [initialStockFilter, onConsumeInitialFilter]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      e.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const totalUnits = useMemo(
     () => products.reduce((sum, p) => sum + p.stock, 0),
@@ -121,14 +175,31 @@ export function InventoryView({
   }, [products]);
 
   const filteredProducts = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const trimmed = searchQuery.trim().toLowerCase();
+    const tokens = trimmed ? trimmed.split(/\s+/).filter(Boolean) : [];
+    const normalizedQuery = normalizeSkuText(trimmed);
+
     const list = products.filter((p) => {
+      const nameLower = p.name.toLowerCase();
+      const skuLower = p.sku.toLowerCase();
+      const normalizedSku = normalizeSkuText(p.sku);
+      const categoryLower = p.category.toLowerCase();
+      const colorNamesLower = (p.colors ?? []).map((c) => c.name.toLowerCase());
+
       const matchesSearch =
-        !q ||
-        p.name.toLowerCase().includes(q) ||
-        p.sku.toLowerCase().includes(q) ||
-        p.category.toLowerCase().includes(q) ||
-        Boolean(p.colors?.some((c) => c.name.toLowerCase().includes(q)));
+        tokens.length === 0 ||
+        (normalizedQuery.length > 0 && normalizedSku.includes(normalizedQuery)) ||
+        tokens.every((token) => {
+          const normalizedToken = normalizeSkuText(token);
+          return (
+            nameLower.includes(token) ||
+            skuLower.includes(token) ||
+            (normalizedToken.length > 0 &&
+              normalizedSku.includes(normalizedToken)) ||
+            categoryLower.includes(token) ||
+            colorNamesLower.some((c) => c.includes(token))
+          );
+        });
 
       const matchesStock =
         stockFilter === "all"
@@ -353,29 +424,63 @@ export function InventoryView({
       {/* Search + Sort + View Mode Toolbar */}
       <div className="flex flex-col gap-2.5 bg-surface-container-lowest border border-outline-variant/40 rounded-xl p-3.5">
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
-          {/* Search Input */}
-          <div className="relative flex items-center flex-1 bg-surface-container-low rounded-xl px-3.5 h-11">
-            <span className="material-symbols-outlined text-on-surface-variant text-[20px] mr-2">
+          {/* Real-Time Name & SKU Search Bar */}
+          <div
+            role="search"
+            aria-label="ค้นหาสินค้าด้วยชื่อหรือรหัส SKU"
+            className="relative flex items-center flex-1 bg-surface-container-low/80 border border-outline-variant/55 rounded-xl px-3.5 h-11 transition-all focus-within:bg-surface-container-lowest focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20"
+          >
+            <span
+              className={`material-symbols-outlined text-[20px] mr-2 transition-colors ${
+                searchQuery.trim()
+                  ? "text-primary"
+                  : "text-on-surface-variant"
+              }`}
+            >
               search
             </span>
             <input
+              ref={searchInputRef}
               type="text"
+              role="searchbox"
+              aria-label="ค้นหาสินค้าด้วยชื่อหรือรหัส SKU"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ค้นหาชื่อกระเป๋า, รหัส SKU, หมวดหมู่ หรือสี..."
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && searchQuery) {
+                  e.preventDefault();
+                  setSearchQuery("");
+                }
+              }}
+              placeholder="ค้นหาชื่อสินค้า หรือ รหัส SKU แบบเรียลไทม์..."
               className="w-full bg-transparent text-on-surface placeholder:text-on-surface-variant text-[13px] focus:outline-none"
             />
-            {searchQuery && (
-              <button
-                type="button"
-                aria-label="ล้างคำค้นหา"
-                onClick={() => setSearchQuery("")}
-                className="w-7 h-7 flex items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[17px]">
-                  close
+            {searchQuery.trim() ? (
+              <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                <span className="text-[11px] font-semibold text-primary bg-primary-fixed/65 px-2 py-0.5 rounded-md tabular-nums whitespace-nowrap">
+                  พบ {filteredProducts.length}
                 </span>
-              </button>
+                <button
+                  type="button"
+                  aria-label="ล้างคำค้นหา"
+                  onClick={() => {
+                    setSearchQuery("");
+                    searchInputRef.current?.focus();
+                  }}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[17px]">
+                    close
+                  </span>
+                </button>
+              </div>
+            ) : (
+              <kbd
+                title="กดปุ่ม / เพื่อค้นหาทันที"
+                className="hidden sm:inline-flex items-center justify-center h-6 min-w-6 px-1.5 ml-2 rounded-md border border-outline-variant/50 bg-surface-container-lowest text-[11px] font-semibold text-on-surface-variant shrink-0"
+              >
+                /
+              </kbd>
             )}
           </div>
 
@@ -663,11 +768,25 @@ export function InventoryView({
       )}
 
       {/* Results Count Bar */}
-      <div className="flex items-center justify-between px-0.5 text-[12px] text-on-surface-variant tabular-nums">
-        <span>
-          แสดง {filteredProducts.length} จาก {products.length} รายการ
-          {selectedCategory !== "ทั้งหมด" ? ` · หมวด: ${selectedCategory}` : ""}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-0.5 text-[12px] text-on-surface-variant tabular-nums">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span>
+            แสดง {filteredProducts.length} จาก {products.length} รายการ
+            {selectedCategory !== "ทั้งหมด"
+              ? ` · หมวด: ${selectedCategory}`
+              : ""}
+            {searchQuery.trim() ? ` · ค้นหา: "${searchQuery.trim()}"` : ""}
+          </span>
+          {searchQuery.trim() && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="text-[11px] font-semibold text-primary hover:underline cursor-pointer"
+            >
+              ล้างคำค้นหา
+            </button>
+          )}
+        </div>
         <span>
           {role === "owner"
             ? "แตะที่รายการสินค้าเพื่อแก้ไขสต็อกและราคา"
@@ -757,10 +876,10 @@ export function InventoryView({
                           />
                           <div className="min-w-0">
                             <p className="font-semibold text-on-surface truncate max-w-[240px]">
-                              {product.name}
+                              {renderHighlightedText(product.name, searchQuery)}
                             </p>
                             <p className="text-[11px] text-on-surface-variant tabular-nums">
-                              {product.sku}
+                              {renderHighlightedText(product.sku, searchQuery)}
                               {product.colors && product.colors.length > 0
                                 ? ` · ${product.colors.length} สี`
                                 : ""}
@@ -930,11 +1049,13 @@ export function InventoryView({
                     />
                     <div className="flex-1 min-w-0">
                       <h3 className="text-[15px] font-semibold text-on-surface line-clamp-2">
-                        {product.name}
+                        {renderHighlightedText(product.name, searchQuery)}
                       </h3>
 
                       <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-on-surface-variant tabular-nums">
-                        <span>{product.sku}</span>
+                        <span>
+                          {renderHighlightedText(product.sku, searchQuery)}
+                        </span>
                         <span>·</span>
                         <span>{product.category}</span>
                         <span>·</span>

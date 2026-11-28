@@ -4,13 +4,10 @@ import {
   createUserWithEmailAndPassword,
   EmailAuthProvider,
   getAuth,
-  GoogleAuthProvider,
   linkWithCredential,
   reauthenticateWithCredential,
-  reauthenticateWithPopup,
   setPersistence,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
   updatePassword,
   updateProfile,
@@ -22,8 +19,6 @@ import firebaseConfig from "../firebase-applet-config.json";
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: "select_account" });
 
 export const USERNAME_EMAIL_DOMAIN = "denewstock.app";
 export const FIREBASE_AUTH_PROVIDERS_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/providers`;
@@ -120,11 +115,6 @@ export async function registerWithUsernamePassword(
   return cred;
 }
 
-export async function signInWithGoogle() {
-  await setPersistence(auth, browserLocalPersistence).catch(() => {});
-  return signInWithPopup(auth, googleProvider);
-}
-
 export async function linkPasswordToCurrentAccount(newPassword: string) {
   const user = auth.currentUser;
   if (!user || !user.email) {
@@ -134,17 +124,7 @@ export async function linkPasswordToCurrentAccount(newPassword: string) {
     throw new Error("รหัสผ่านต้องมีความยาว 6–128 ตัวอักษร");
   }
   const credential = EmailAuthProvider.credential(user.email, newPassword);
-  try {
-    await linkWithCredential(user, credential);
-  } catch (err) {
-    const code = (err as { code?: string })?.code || "";
-    if (code === "auth/requires-recent-login") {
-      await reauthenticateWithPopup(user, googleProvider);
-      await linkWithCredential(user, credential);
-    } else {
-      throw err;
-    }
-  }
+  await linkWithCredential(user, credential);
   await user.reload().catch(() => {});
   return user;
 }
@@ -242,29 +222,6 @@ export function formatPasswordAuthError(err: unknown): {
   return {
     message: "ไม่สามารถเข้าสู่ระบบได้ กรุณาลองใหม่อีกครั้ง",
   };
-}
-
-export function formatGoogleAuthError(err: unknown): string {
-  const code = (err as { code?: string })?.code || "";
-  if (
-    code === "auth/popup-closed-by-user" ||
-    code === "auth/cancelled-popup-request"
-  ) {
-    return "";
-  }
-  if (code === "auth/popup-blocked") {
-    return "เบราว์เซอร์บล็อกหน้าต่างล็อกอิน Google กรุณาอนุญาตป๊อปอัป (Pop-up) แล้วลองใหม่อีกครั้ง";
-  }
-  if (code === "auth/unauthorized-domain") {
-    return "โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Authentication (Authorized domains)";
-  }
-  if (code === "auth/network-request-failed") {
-    return "ไม่สามารถเชื่อมต่ออินเทอร์เน็ตได้ กรุณาตรวจสอบสัญญาณแล้วลองใหม่";
-  }
-  if (code === "auth/operation-not-allowed") {
-    return "ยังไม่ได้เปิดใช้งาน Google Sign-In ในโปรเจกต์ Firebase";
-  }
-  return "ไม่สามารถเข้าสู่ระบบด้วย Google ได้ กรุณาลองใหม่อีกครั้ง";
 }
 
 export enum OperationType {

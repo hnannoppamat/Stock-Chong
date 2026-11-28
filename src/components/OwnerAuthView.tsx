@@ -5,7 +5,6 @@ import {
   normalizePromptPayDigits,
   parsePromptPayTarget,
 } from "../utils/promptpay";
-import { GoogleLogoSvg } from "./GoogleLoginScreen";
 
 export interface PasswordActionResult {
   ok: boolean;
@@ -52,7 +51,6 @@ interface OwnerAuthViewProps {
   liveStatus: "connected" | "connecting" | "reconnecting" | "offline";
   onlineDevicesCount: number;
   onOpenMultiDevice: () => void;
-  onConnectCloud: () => void;
   onDisconnectCloud: () => void;
   onSyncAllToCloud?: () => void;
   isStandalone?: boolean;
@@ -92,7 +90,6 @@ export function OwnerAuthView({
   liveStatus,
   onlineDevicesCount,
   onOpenMultiDevice,
-  onConnectCloud,
   onDisconnectCloud,
   onSyncAllToCloud,
   isStandalone = false,
@@ -1165,9 +1162,9 @@ export function OwnerAuthView({
           )}
         </div>
 
-        {/* Right Column: Google Account + Mobile App Install + Online Cloud Sync + Permission Summary */}
+        {/* Right Column: Store Account + Mobile App Install + Online Cloud Sync + Permission Summary */}
         <div className="lg:col-span-6 flex flex-col gap-3">
-          {/* Google Login Account Card */}
+          {/* Store Login Account Card */}
           <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/40 shadow-sm flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
@@ -1187,15 +1184,17 @@ export function OwnerAuthView({
                     )}
                   </div>
                 ) : (
-                  <div className="w-11 h-11 rounded-xl bg-surface-container-low border border-outline-variant/60 flex items-center justify-center shrink-0">
-                    <GoogleLogoSvg className="w-6 h-6" />
+                  <div className="w-11 h-11 rounded-xl bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[24px]">
+                      person
+                    </span>
                   </div>
                 )}
                 <div className="min-w-0">
                   <h3 className="text-[14.5px] font-bold text-on-surface leading-tight truncate">
                     {cloudUserEmail
                       ? cloudUserName || "เข้าสู่ระบบแล้ว"
-                      : "เข้าสู่ระบบบัญชีร้านค้า"}
+                      : "บัญชีร้านค้า"}
                   </h3>
                   <p className="text-[12px] text-on-surface-variant truncate mt-0.5">
                     {cloudUserEmail
@@ -1215,7 +1214,7 @@ export function OwnerAuthView({
               </span>
             </div>
 
-            {cloudUserEmail ? (
+            {cloudUserEmail && (
               <div className="flex flex-col gap-2">
                 {role === "staff" && (
                   <p className="text-[11.5px] text-on-surface-variant bg-surface-container-low rounded-lg px-2.5 py-2 flex items-center gap-1.5">
@@ -1245,7 +1244,7 @@ export function OwnerAuthView({
                       <span>
                         {isSyncingCloudAll
                           ? "กำลังซิงก์..."
-                          : "ซิงก์ข้อมูลทั้งหมดขึ้น Firebase"}
+                          : "ซิงก์ข้อมูลทั้งหมดขึ้นคลาวด์"}
                       </span>
                     </button>
                   )}
@@ -1261,20 +1260,6 @@ export function OwnerAuthView({
                   </button>
                 </div>
               </div>
-            ) : (
-              <button
-                type="button"
-                disabled={cloudStatus === "connecting"}
-                onClick={onConnectCloud}
-                className="w-full h-11 px-4 rounded-xl bg-white hover:bg-surface-container-low text-[#1f1f1f] border border-outline-variant shadow-xs font-semibold text-[14px] flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-60"
-              >
-                <GoogleLogoSvg className="w-5 h-5 shrink-0" />
-                <span>
-                  {cloudStatus === "connecting"
-                    ? "กำลังเข้าสู่ระบบด้วย Google..."
-                    : "เข้าสู่ระบบด้วย Google"}
-                </span>
-              </button>
             )}
           </div>
 
@@ -1380,7 +1365,7 @@ export function OwnerAuthView({
                 <span>ดูเครื่องที่ออนไลน์ / คัดลอกลิงก์เชิญ</span>
               </button>
 
-              {cloudStatus === "connected" ? (
+              {cloudStatus === "connected" && (
                 <>
                   {onSyncAllToCloud && (
                     <button
@@ -1398,8 +1383,8 @@ export function OwnerAuthView({
                       </span>
                       <span>
                         {isSyncingCloudAll
-                          ? "กำลังซิงก์ขึ้น Google Cloud..."
-                          : "ซิงก์ข้อมูลทั้งหมดขึ้น Google Cloud"}
+                          ? "กำลังซิงก์ขึ้นคลาวด์..."
+                          : "ซิงก์ข้อมูลทั้งหมดขึ้นคลาวด์"}
                       </span>
                     </button>
                   )}
@@ -1409,27 +1394,11 @@ export function OwnerAuthView({
                     className="h-10 px-4 rounded-xl bg-surface-container hover:bg-error-container hover:text-error text-on-surface text-[12.5px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <span className="material-symbols-outlined text-[17px]">
-                      cloud_off
+                      logout
                     </span>
-                    <span>ตัดคลาวด์ Google</span>
+                    <span>ออกจากระบบ</span>
                   </button>
                 </>
-              ) : (
-                <button
-                  type="button"
-                  disabled={cloudStatus === "connecting"}
-                  onClick={onConnectCloud}
-                  className="h-10 px-4 rounded-xl bg-primary hover:bg-primary-dim text-on-primary text-[13px] font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-60"
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    cloud_sync
-                  </span>
-                  <span>
-                    {cloudStatus === "connecting"
-                      ? "กำลังเชื่อมต่อ..."
-                      : "เชื่อมต่อ & สำรองขึ้น Google Cloud"}
-                  </span>
-                </button>
               )}
             </div>
           </div>

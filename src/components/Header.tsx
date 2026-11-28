@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 import { AppNotification, ProductItem, RoleMode, TabId } from "../types";
-import { GoogleLogoSvg } from "./GoogleLoginScreen";
 
 interface HeaderProps {
   role: RoleMode;
@@ -24,7 +23,6 @@ interface HeaderProps {
   liveStatus: "connected" | "connecting" | "reconnecting" | "offline";
   onlineDevicesCount: number;
   onCloudSyncClick: () => void;
-  onConnectCloud?: () => void;
   onDisconnectCloud?: () => void;
   onSyncAllToCloud?: () => void;
   isSyncingCloudAll?: boolean;
@@ -54,7 +52,6 @@ export function Header({
   liveStatus,
   onlineDevicesCount,
   onCloudSyncClick,
-  onConnectCloud,
   onDisconnectCloud,
   onSyncAllToCloud,
   isSyncingCloudAll = false,
@@ -180,7 +177,7 @@ export function Header({
               liveStatus === "connected"
                 ? `ออนไลน์พร้อมกัน ${onlineDevicesCount} เครื่อง${
                     cloudStatus === "connected"
-                      ? ` · สำรองคลาวด์แล้ว (${cloudUserEmail || "Google"})`
+                      ? ` · สำรองคลาวด์แล้ว (${cloudUserEmail || "บัญชีร้าน"})`
                       : ""
                   }`
                 : "จัดการการใช้งานพร้อมกันหลายเครื่อง & ซิงก์คลาวด์"
@@ -277,7 +274,7 @@ export function Header({
             )}
           </button>
 
-          {cloudUserEmail ? (
+          {cloudUserEmail && (
             <button
               type="button"
               aria-label="บัญชีที่เข้าสู่ระบบ"
@@ -301,20 +298,6 @@ export function Header({
                 </span>
               )}
             </button>
-          ) : (
-            onConnectCloud && (
-              <button
-                type="button"
-                disabled={cloudStatus === "connecting"}
-                onClick={onConnectCloud}
-                aria-label="เข้าสู่ระบบด้วย Google"
-                title="เข้าสู่ระบบด้วย Google เพื่อบันทึกขึ้น Firebase"
-                className="h-9 px-2.5 rounded-full bg-white hover:bg-surface-container-low text-[#1f1f1f] border border-outline-variant text-[12px] font-semibold flex items-center gap-1.5 shrink-0 shadow-xs transition-all active:scale-95 cursor-pointer disabled:opacity-60"
-              >
-                <GoogleLogoSvg className="w-4 h-4 shrink-0" />
-                <span className="hidden sm:inline">ล็อกอิน Google</span>
-              </button>
-            )
           )}
 
           {openAccount && cloudUserEmail && (

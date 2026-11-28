@@ -13,6 +13,7 @@ import {
   AccountingEntry,
   AccountingEntryType,
   AccountingPaymentMethod,
+  LiveExchangeRate,
   Order,
   ProductItem,
   RoleMode,
@@ -58,8 +59,10 @@ interface AccountingViewProps {
   cloudStatus?: "connected" | "connecting" | "local";
   cloudUserEmail?: string | null;
   isSyncingCloudAll?: boolean;
-  onConnectCloud?: () => void;
   onSyncAllToCloud?: () => void;
+  liveCnyRate?: LiveExchangeRate | null;
+  isRefreshingRate?: boolean;
+  onRefreshRate?: () => void;
 }
 
 const PAYMENT_METHODS: AccountingPaymentMethod[] = [
@@ -114,10 +117,23 @@ export function AccountingView({
   cloudStatus = "local",
   cloudUserEmail,
   isSyncingCloudAll = false,
-  onConnectCloud,
   onSyncAllToCloud,
+  liveCnyRate = null,
+  isRefreshingRate = false,
+  onRefreshRate,
 }: AccountingViewProps) {
   const [subTab, setSubTab] = useState<"ledger" | "order_pnl">("ledger");
+  const [cnyInput, setCnyInput] = useState("100");
+
+  const parsedCny = Math.max(0, parseFloat(cnyInput) || 0);
+  const effectiveRate = liveCnyRate?.rate ?? 4.95;
+  const convertedThb = parsedCny * effectiveRate;
+  const rateUpdatedTime = liveCnyRate?.updatedAt
+    ? new Date(liveCnyRate.updatedAt).toLocaleTimeString("th-TH", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState("");
@@ -757,42 +773,26 @@ export function AccountingView({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {cloudStatus === "connected" ? (
-            onSyncAllToCloud && (
-              <button
-                type="button"
-                disabled={isSyncingCloudAll}
-                onClick={onSyncAllToCloud}
-                className="h-9 px-3.5 rounded-lg bg-secondary text-on-secondary hover:opacity-90 text-[12px] font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-60 whitespace-nowrap"
+          {cloudStatus === "connected" && onSyncAllToCloud && (
+            <button
+              type="button"
+              disabled={isSyncingCloudAll}
+              onClick={onSyncAllToCloud}
+              className="h-9 px-3.5 rounded-lg bg-secondary text-on-secondary hover:opacity-90 text-[12px] font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-60 whitespace-nowrap"
+            >
+              <span
+                className={`material-symbols-outlined text-[16px] ${
+                  isSyncingCloudAll ? "animate-spin" : ""
+                }`}
               >
-                <span
-                  className={`material-symbols-outlined text-[16px] ${
-                    isSyncingCloudAll ? "animate-spin" : ""
-                  }`}
-                >
-                  {isSyncingCloudAll ? "progress_activity" : "cloud_sync"}
-                </span>
-                <span>
-                  {isSyncingCloudAll
-                    ? "กำลังบันทึกขึ้น Cloud..."
-                    : "ซิงก์ข้อมูลทั้งหมดขึ้น Google Cloud"}
-                </span>
-              </button>
-            )
-          ) : (
-            onConnectCloud && (
-              <button
-                type="button"
-                disabled={cloudStatus === "connecting"}
-                onClick={onConnectCloud}
-                className="h-9 px-3.5 rounded-lg bg-primary text-on-primary hover:bg-primary-dim text-[12px] font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-60 whitespace-nowrap"
-              >
-                <span className="material-symbols-outlined text-[16px]">
-                  cloud_upload
-                </span>
-                <span>เชื่อม Google Cloud</span>
-              </button>
-            )
+                {isSyncingCloudAll ? "progress_activity" : "cloud_sync"}
+              </span>
+              <span>
+                {isSyncingCloudAll
+                  ? "กำลังบันทึกขึ้นคลาวด์..."
+                  : "ซิงก์ข้อมูลทั้งหมดขึ้นคลาวด์"}
+              </span>
+            </button>
           )}
         </div>
       </div>
@@ -1147,6 +1147,107 @@ export function AccountingView({
           </p>
         </div>
       </div>
+
+      {/* Live Market CNY -> THB Exchange Rate & Import Cost Converter (Owner Accounting Only) */}
+      <section
+        aria-label="เรทเงินหยวนสดวันนี้"
+        className="bg-surface-container-lowest border border-outline-variant/45 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5"
+      >
+        <div className="flex items-start justify-between gap-2 lg:min-w-[230px]">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                currency_exchange
+              </span>
+              <h2 className="text-[14.5px] font-bold text-on-surface tracking-tight">
+                เรทหยวนสดวันนี้ (CNY → THB)
+              </h2>
+            </div>
+            <p className="text-[11px] text-on-surface-variant mt-0.5 tabular-nums">
+              {liveCnyRate
+                ? `${liveCnyRate.source}${rateUpdatedTime ? ` · อัปเดต ${rateUpdatedTime}` : ""}`
+                : "กำลังดึงอัตราแลกเปลี่ยนสด..."}
+            </p>
+          </div>
+          {onRefreshRate && (
+            <button
+              type="button"
+              onClick={onRefreshRate}
+              disabled={isRefreshingRate}
+              aria-label="รีเฟรชอัตราแลกเปลี่ยนสด"
+              className="lg:hidden h-8 px-2.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-primary text-[11px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
+            >
+              <span
+                className={`material-symbols-outlined text-[15px] ${
+                  isRefreshingRate ? "animate-spin" : ""
+                }`}
+              >
+                refresh
+              </span>
+              <span>อัปเดต</span>
+            </button>
+          )}
+        </div>
+
+        <div className="rounded-xl bg-surface-container-low px-3.5 py-2 flex items-baseline justify-between lg:justify-center gap-3 shrink-0">
+          <span className="text-[12px] font-semibold text-on-surface-variant">
+            1 หยวน (¥)
+          </span>
+          <div className="flex items-baseline gap-1 tabular-nums">
+            <span className="text-[22px] font-bold text-primary leading-none">
+              ฿{effectiveRate.toFixed(2)}
+            </span>
+            <span className="text-[11px] text-on-surface-variant">บาท</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-1 lg:max-w-[380px]">
+          <div className="flex-1 flex items-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-2.5 h-10">
+            <span className="text-[12px] font-bold text-on-surface-variant">
+              ¥
+            </span>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={cnyInput}
+              onChange={(e) => setCnyInput(e.target.value)}
+              aria-label="จำนวนเงินหยวนที่ต้องการคำนวณ"
+              className="w-full bg-transparent text-[13px] font-semibold text-on-surface tabular-nums focus:outline-none"
+              placeholder="100"
+            />
+          </div>
+          <span className="material-symbols-outlined text-[16px] text-on-surface-variant shrink-0">
+            arrow_forward
+          </span>
+          <div className="flex-1 rounded-lg bg-primary-fixed/50 px-3 h-10 flex items-center justify-between gap-1 tabular-nums">
+            <span className="text-[11px] font-medium text-on-primary-fixed">
+              ประมาณ
+            </span>
+            <span className="text-[13px] font-bold text-primary truncate">
+              ฿{convertedThb.toLocaleString("th-TH", { maximumFractionDigits: 2 })}
+            </span>
+          </div>
+          {onRefreshRate && (
+            <button
+              type="button"
+              onClick={onRefreshRate}
+              disabled={isRefreshingRate}
+              aria-label="รีเฟรชอัตราแลกเปลี่ยนสด"
+              className="hidden lg:flex h-10 px-3 rounded-lg bg-surface-container-low hover:bg-surface-container text-primary text-[12px] font-semibold items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
+            >
+              <span
+                className={`material-symbols-outlined text-[16px] ${
+                  isRefreshingRate ? "animate-spin" : ""
+                }`}
+              >
+                refresh
+              </span>
+              <span>อัปเดต</span>
+            </button>
+          )}
+        </div>
+      </section>
 
       {/* Add / Edit Accounting Entry Form */}
       {formOpen && (

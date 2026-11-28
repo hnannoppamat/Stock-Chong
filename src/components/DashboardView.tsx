@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   LiveActivityEvent,
-  LiveExchangeRate,
   Order,
   OrderStatus,
   ProductItem,
   RoleMode,
 } from "../types";
 import { LiveConnectionStatus } from "../utils/liveSync";
+import { DailySalesRevenueChart } from "./DailySalesRevenueChart";
 import { DashboardOverviewWidgets } from "./DashboardOverviewWidgets";
 import { ResilientImage } from "./ResilientImage";
 
@@ -22,9 +22,6 @@ interface DashboardViewProps {
   onlineDevicesCount: number;
   liveLatencyMs: number | null;
   liveEvents: LiveActivityEvent[];
-  liveCnyRate: LiveExchangeRate | null;
-  isRefreshingRate: boolean;
-  onRefreshRate: () => void;
   onOpenMultiDevice: () => void;
   onSyncNow: () => void;
   onQuickCreateOrder: () => void;
@@ -109,9 +106,6 @@ export function DashboardView({
   onlineDevicesCount,
   liveLatencyMs,
   liveEvents,
-  liveCnyRate,
-  isRefreshingRate,
-  onRefreshRate,
   onOpenMultiDevice,
   onSyncNow,
   onQuickCreateOrder,
@@ -128,7 +122,6 @@ export function DashboardView({
   onDeleteProduct,
 }: DashboardViewProps) {
   const [syncing, setSyncing] = useState(false);
-  const [cnyInput, setCnyInput] = useState("100");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Update relative timestamps smoothly while viewing real-time feed
@@ -159,16 +152,6 @@ export function DashboardView({
     onSyncNow();
     setTimeout(() => setSyncing(false), 600);
   };
-
-  const parsedCny = Math.max(0, parseFloat(cnyInput) || 0);
-  const effectiveRate = liveCnyRate?.rate ?? 4.95;
-  const convertedThb = parsedCny * effectiveRate;
-  const rateUpdatedTime = liveCnyRate?.updatedAt
-    ? new Date(liveCnyRate.updatedAt).toLocaleTimeString("th-TH", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "";
 
   const isRealtimeActive =
     liveStatus === "connected" || cloudStatus === "connected";
@@ -227,7 +210,7 @@ export function DashboardView({
                 />
                 <span>
                   {cloudStatus === "connected"
-                    ? "เรียลไทม์ + Google Cloud"
+                    ? "เรียลไทม์ + ซิงก์คลาวด์"
                     : liveStatus === "connected"
                       ? `ซิงก์สดหลายเครื่อง (${onlineDevicesCount} เครื่อง)`
                       : "กำลังเชื่อมต่อเรียลไทม์..."}
@@ -277,13 +260,21 @@ export function DashboardView({
         onDeleteProduct={onDeleteProduct}
       />
 
-      {/* Real-Time Data Hub: Live Multi-Device Activity Feed & Live CNY/THB Market Exchange Rate */}
+      {/* 7-Day Daily Sales Revenue Bar Chart */}
+      <DailySalesRevenueChart
+        orders={orders}
+        role={role}
+        onQuickCreateOrder={onQuickCreateOrder}
+        onNavigateAccounting={onNavigateAccounting}
+      />
+
+      {/* Real-Time Multi-Device Activity Feed */}
       <section
-        aria-label="ข้อมูลเรียลไทม์และอัตราแลกเปลี่ยนสด"
-        className="grid grid-cols-1 lg:grid-cols-12 gap-3"
+        aria-label="ความเคลื่อนไหวเรียลไทม์ทุกเครื่อง"
+        className="w-full"
       >
         {/* Live Activity Feed (Real WebSocket & Google Cloud Events) */}
-        <div className="lg:col-span-7 bg-surface-container-lowest border border-outline-variant/45 rounded-xl p-4 flex flex-col gap-3">
+        <div className="bg-surface-container-lowest border border-outline-variant/45 rounded-xl p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0 flex items-center gap-2">
               <span
@@ -300,7 +291,7 @@ export function DashboardView({
                 <p className="text-[11px] text-on-surface-variant tabular-nums">
                   เชื่อมต่อ {onlineDevicesCount} เครื่อง
                   {cloudStatus === "connected"
-                    ? " · ซิงก์ Google Cloud อัตโนมัติ"
+                    ? " · ซิงก์คลาวด์อัตโนมัติ"
                     : " · อัปเดตทันทีผ่าน WebSocket"}
                 </p>
               </div>
@@ -351,7 +342,7 @@ export function DashboardView({
                       </p>
                       <p className="text-[10px] text-on-surface-variant truncate">
                         {ev.deviceName}
-                        {ev.source === "cloud" ? " · Google Cloud" : " · Live"}
+                        {ev.source === "cloud" ? " · Cloud" : " · Live"}
                       </p>
                     </div>
                     <span className="text-[10px] font-semibold text-on-surface-variant tabular-nums whitespace-nowrap shrink-0">
@@ -362,85 +353,6 @@ export function DashboardView({
               })}
             </div>
           )}
-        </div>
-
-        {/* Live Market CNY -> THB Exchange Rate Widget */}
-        <div className="lg:col-span-5 bg-surface-container-lowest border border-outline-variant/45 rounded-xl p-4 flex flex-col justify-between gap-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[18px] text-primary">
-                  currency_exchange
-                </span>
-                <h2 className="text-[15px] font-bold text-on-surface tracking-tight">
-                  เรทหยวนสดวันนี้ (CNY → THB)
-                </h2>
-              </div>
-              <p className="text-[11px] text-on-surface-variant mt-0.5 tabular-nums">
-                {liveCnyRate
-                  ? `${liveCnyRate.source}${rateUpdatedTime ? ` · อัปเดต ${rateUpdatedTime}` : ""}`
-                  : "กำลังดึงอัตราแลกเปลี่ยนสด..."}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onRefreshRate}
-              disabled={isRefreshingRate}
-              aria-label="รีเฟรชอัตราแลกเปลี่ยนสด"
-              className="h-8 px-2.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-primary text-[11px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
-            >
-              <span
-                className={`material-symbols-outlined text-[15px] ${
-                  isRefreshingRate ? "animate-spin" : ""
-                }`}
-              >
-                refresh
-              </span>
-              <span>อัปเดต</span>
-            </button>
-          </div>
-
-          <div className="rounded-xl bg-surface-container-low px-3.5 py-2.5 flex items-baseline justify-between gap-2">
-            <span className="text-[12px] font-semibold text-on-surface-variant">
-              1 หยวน (¥)
-            </span>
-            <div className="flex items-baseline gap-1 tabular-nums">
-              <span className="text-[24px] font-bold text-primary leading-none">
-                ฿{effectiveRate.toFixed(2)}
-              </span>
-              <span className="text-[11px] text-on-surface-variant">บาท</span>
-            </div>
-          </div>
-
-          {/* Quick Live Import Cost Converter */}
-          <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-2.5 h-10">
-              <span className="text-[12px] font-bold text-on-surface-variant">
-                ¥
-              </span>
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={cnyInput}
-                onChange={(e) => setCnyInput(e.target.value)}
-                aria-label="จำนวนเงินหยวนที่ต้องการคำนวณ"
-                className="w-full bg-transparent text-[13px] font-semibold text-on-surface tabular-nums focus:outline-none"
-                placeholder="100"
-              />
-            </div>
-            <span className="material-symbols-outlined text-[16px] text-on-surface-variant shrink-0">
-              arrow_forward
-            </span>
-            <div className="flex-1 rounded-lg bg-primary-fixed/50 px-3 h-10 flex items-center justify-between gap-1 tabular-nums">
-              <span className="text-[11px] font-medium text-on-primary-fixed">
-                ประมาณ
-              </span>
-              <span className="text-[13px] font-bold text-primary truncate">
-                ฿{convertedThb.toLocaleString("th-TH", { maximumFractionDigits: 2 })}
-              </span>
-            </div>
-          </div>
         </div>
       </section>
 

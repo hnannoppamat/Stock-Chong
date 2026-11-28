@@ -33,12 +33,10 @@ import {
   auth,
   changeAccountPassword,
   formatAccountIdentifier,
-  formatGoogleAuthError,
   formatPasswordAuthError,
   isPasswordAuthUser,
   linkPasswordToCurrentAccount,
   registerWithUsernamePassword,
-  signInWithGoogle,
   signInWithUsernamePassword,
   signOutUser,
 } from "./firebase";
@@ -1616,27 +1614,6 @@ export default function App() {
     }
   };
 
-  const handleConnectCloud = async () => {
-    try {
-      setAuthError(null);
-      setAuthProviderDisabled(false);
-      setCloudStatus("connecting");
-      const cred = await signInWithGoogle();
-      showToast(
-        `เข้าสู่ระบบ Google สำเร็จ (${cred.user.email || "Google"})`,
-        "cloud_done"
-      );
-    } catch (err) {
-      setCloudStatus(cloudUser ? "connected" : "local");
-      const friendly = formatGoogleAuthError(err);
-      if (!friendly) {
-        return;
-      }
-      setAuthError(friendly);
-      showToast(friendly, "cloud_off");
-    }
-  };
-
   const handleDisconnectCloud = async () => {
     try {
       if (cloudUser) {
@@ -1650,23 +1627,17 @@ export default function App() {
     }
   };
 
-  const handleSyncAllToGoogleCloud = async () => {
+  const handleSyncAllToCloud = async () => {
     if (isSyncingCloudAll) return;
     setIsSyncingCloudAll(true);
     try {
-      let targetUser = cloudUserRef.current;
-      if (!targetUser) {
-        setCloudStatus("connecting");
-        const cred = await signInWithGoogle();
-        targetUser = cred.user;
-      }
-
+      const targetUser = cloudUserRef.current;
       if (
         !targetUser ||
         (targetUser.emailVerified === false && !isPasswordAuthUser(targetUser))
       ) {
         showToast(
-          "กรุณาเข้าสู่ระบบด้วยบัญชีร้านหรือบัญชี Google ที่ยืนยันแล้ว",
+          "กรุณาเข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่านก่อนซิงก์ข้อมูล",
           "error"
         );
         return;
@@ -1678,21 +1649,13 @@ export default function App() {
       );
       stampSynced();
       showToast(
-        `บันทึกข้อมูลทุกอย่างขึ้น Google Cloud สำเร็จ (สินค้า ${summary.products}, ออเดอร์ ${summary.orders}, บัญชี ${summary.accounting} รายการ)`,
+        `บันทึกข้อมูลทุกอย่างขึ้นคลาวด์สำเร็จ (สินค้า ${summary.products}, ออเดอร์ ${summary.orders}, บัญชี ${summary.accounting} รายการ)`,
         "cloud_done"
       );
     } catch (err) {
-      const code = (err as { code?: string })?.code || "";
-      if (
-        code === "auth/popup-closed-by-user" ||
-        code === "auth/cancelled-popup-request"
-      ) {
-        setCloudStatus(cloudUserRef.current ? "connected" : "local");
-        return;
-      }
-      console.error("Full Google Cloud sync failed:", err);
+      console.error("Full Cloud sync failed:", err);
       showToast(
-        "ไม่สามารถซิงก์ข้อมูลขึ้น Google Cloud ได้ กรุณาลองใหม่อีกครั้ง",
+        "ไม่สามารถซิงก์ข้อมูลขึ้นคลาวด์ได้ กรุณาลองใหม่อีกครั้ง",
         "cloud_off"
       );
     } finally {
@@ -2911,7 +2874,6 @@ export default function App() {
         providerDisabled={authProviderDisabled}
         onSignInWithPassword={handleSignInWithPassword}
         onRegisterWithPassword={handleRegisterWithPassword}
-        onSignInWithGoogle={handleConnectCloud}
         onClearError={() => {
           setAuthError(null);
           setAuthProviderDisabled(false);
@@ -2971,9 +2933,8 @@ export default function App() {
         liveStatus={liveStatus}
         onlineDevicesCount={mergedDevices.length}
         onCloudSyncClick={() => setShowMultiDeviceModal(true)}
-        onConnectCloud={() => void handleConnectCloud()}
         onDisconnectCloud={() => void handleDisconnectCloud()}
-        onSyncAllToCloud={() => void handleSyncAllToGoogleCloud()}
+        onSyncAllToCloud={() => void handleSyncAllToCloud()}
         isSyncingCloudAll={isSyncingCloudAll}
         isStandalone={pwa.isStandalone}
         onInstallApp={() => void handleTriggerInstallApp()}
@@ -2999,8 +2960,10 @@ export default function App() {
             cloudStatus={cloudStatus}
             cloudUserEmail={accountIdentifier}
             isSyncingCloudAll={isSyncingCloudAll}
-            onConnectCloud={() => void handleConnectCloud()}
-            onSyncAllToCloud={() => void handleSyncAllToGoogleCloud()}
+            onSyncAllToCloud={() => void handleSyncAllToCloud()}
+            liveCnyRate={liveCnyRate}
+            isRefreshingRate={isRefreshingRate}
+            onRefreshRate={() => void fetchLiveCnyRate(true)}
           />
         )}
 
@@ -3016,9 +2979,6 @@ export default function App() {
             onlineDevicesCount={mergedDevices.length}
             liveLatencyMs={liveLatencyMs}
             liveEvents={liveEvents}
-            liveCnyRate={liveCnyRate}
-            isRefreshingRate={isRefreshingRate}
-            onRefreshRate={() => void fetchLiveCnyRate(true)}
             onOpenMultiDevice={() => setShowMultiDeviceModal(true)}
             onSyncNow={handleSyncNow}
             onQuickCreateOrder={handleQuickCreateOrder}
@@ -3155,9 +3115,8 @@ export default function App() {
             liveStatus={liveStatus}
             onlineDevicesCount={mergedDevices.length}
             onOpenMultiDevice={() => setShowMultiDeviceModal(true)}
-            onConnectCloud={() => void handleConnectCloud()}
             onDisconnectCloud={() => void handleDisconnectCloud()}
-            onSyncAllToCloud={() => void handleSyncAllToGoogleCloud()}
+            onSyncAllToCloud={() => void handleSyncAllToCloud()}
             isStandalone={pwa.isStandalone}
             onInstallApp={() => void handleTriggerInstallApp()}
           />
@@ -3209,9 +3168,8 @@ export default function App() {
             accounting: accountingEntries.length,
           }}
           onRenameDevice={handleRenameDevice}
-          onConnectCloud={() => void handleConnectCloud()}
           onDisconnectCloud={() => void handleDisconnectCloud()}
-          onSyncAllToCloud={() => void handleSyncAllToGoogleCloud()}
+          onSyncAllToCloud={() => void handleSyncAllToCloud()}
           onNotify={showToast}
           onClose={() => setShowMultiDeviceModal(false)}
         />
