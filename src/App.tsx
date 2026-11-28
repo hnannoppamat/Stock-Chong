@@ -16,9 +16,15 @@ import {
   PrintLabelModal,
 } from "./components/Modals";
 import { MultiDeviceModal } from "./components/MultiDeviceModal";
+import { OfflineIndicator } from "./components/OfflineIndicator";
 import { OrderPaymentQrModal } from "./components/OrderPaymentQrModal";
 import { OrdersView } from "./components/OrdersView";
 import { OwnerAuthView } from "./components/OwnerAuthView";
+import {
+  PWAInstallBanner,
+  PWAInstallGuideModal,
+} from "./components/PWAInstallPrompt";
+import { usePWAInstall } from "./hooks/usePWAInstall";
 import {
   INITIAL_ACCOUNTING_ENTRIES,
   INITIAL_APPROVALS,
@@ -305,6 +311,8 @@ export default function App() {
     triggerContext?: string;
   } | null>(null);
   const [aiChatOpen, setAiChatOpen] = useState(false);
+  const pwa = usePWAInstall();
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
 
   const [toast, setToast] = useState<{
     visible: boolean;
@@ -2830,8 +2838,17 @@ export default function App() {
         ? `คลาวด์ · ${lastSyncedLabel}`
         : lastSyncedLabel;
 
+  const handleTriggerInstallApp = async () => {
+    const outcome = await pwa.promptInstall();
+    if (outcome === "accepted") {
+      showToast("กำลังติดตั้งแอพ DenewStock ลงหน้าจอหลัก", "install_mobile");
+    } else if (outcome === "manual") {
+      setShowInstallGuide(true);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-surface text-on-surface flex flex-col">
+    <div className="min-h-[100dvh] bg-surface text-on-surface flex flex-col">
       <Header
         role={role}
         ownerName={ownerName}
@@ -2883,9 +2900,15 @@ export default function App() {
         liveStatus={liveStatus}
         onlineDevicesCount={mergedDevices.length}
         onCloudSyncClick={() => setShowMultiDeviceModal(true)}
+        isStandalone={pwa.isStandalone}
+        onInstallApp={() => void handleTriggerInstallApp()}
       />
 
-      <main className="flex-1 w-full max-w-6xl mx-auto px-4 md:px-6 pt-18 md:pt-20 pb-24 md:pb-10">
+      <main className="flex-1 w-full max-w-6xl mx-auto px-3 sm:px-4 md:px-6 main-mobile-spacing">
+        <PWAInstallBanner
+          pwa={pwa}
+          onTriggerInstall={() => void handleTriggerInstallApp()}
+        />
         {role === "owner" && activeTab === "accounting" && (
           <AccountingView
             role={role}
@@ -3086,6 +3109,8 @@ export default function App() {
             onConnectCloud={() => void handleConnectCloud()}
             onDisconnectCloud={() => void handleDisconnectCloud()}
             onSyncAllToCloud={() => void handleSyncAllToGoogleCloud()}
+            isStandalone={pwa.isStandalone}
+            onInstallApp={() => void handleTriggerInstallApp()}
           />
         )}
       </main>
@@ -3100,9 +3125,11 @@ export default function App() {
         pendingApprovalsCount={pendingApprovalsCount}
       />
 
+      <OfflineIndicator />
+
       {/* Toast Notification */}
       <div
-        className={`fixed bottom-20 md:bottom-6 left-4 right-4 z-50 pointer-events-none transition-all duration-200 flex justify-center ${
+        className={`fixed bottom-above-nav left-4 right-4 z-50 pointer-events-none transition-all duration-200 flex justify-center ${
           toast.visible
             ? "opacity-100 translate-y-0"
             : "opacity-0 translate-y-2"
@@ -3237,6 +3264,13 @@ export default function App() {
           onClose={() => setLowStockLineAlert(null)}
         />
       )}
+
+      <PWAInstallGuideModal
+        open={showInstallGuide}
+        onClose={() => setShowInstallGuide(false)}
+        isIOS={pwa.isIOS}
+        isAndroid={pwa.isAndroid}
+      />
 
       <AiChatWidget
         open={aiChatOpen}

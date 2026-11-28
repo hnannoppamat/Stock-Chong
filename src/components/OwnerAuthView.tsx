@@ -43,6 +43,8 @@ interface OwnerAuthViewProps {
   onConnectCloud: () => void;
   onDisconnectCloud: () => void;
   onSyncAllToCloud?: () => void;
+  isStandalone?: boolean;
+  onInstallApp?: () => void;
 }
 
 export function OwnerAuthView({
@@ -80,6 +82,8 @@ export function OwnerAuthView({
   onConnectCloud,
   onDisconnectCloud,
   onSyncAllToCloud,
+  isStandalone = false,
+  onInstallApp,
 }: OwnerAuthViewProps) {
   // Always open on the Owner tab so tapping "เข้าเจ้าของร้าน" shows the PIN keypad immediately
   const [selectedTab, setSelectedTab] = useState<RoleMode>("owner");
@@ -977,8 +981,47 @@ export function OwnerAuthView({
           )}
         </div>
 
-        {/* Right Column: Online Cloud Sync + Permission Summary */}
+        {/* Right Column: Mobile App Install + Online Cloud Sync + Permission Summary */}
         <div className="lg:col-span-6 flex flex-col gap-3">
+          {/* Mobile PWA Install Card */}
+          <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/40 shadow-sm flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <img
+                src="/pwa-192x192.png"
+                alt="DenewStock"
+                className="w-11 h-11 rounded-xl border border-outline-variant/40 shadow-xs shrink-0"
+              />
+              <div className="min-w-0">
+                <h3 className="text-[14px] font-bold text-on-surface leading-tight">
+                  ใช้งานเป็นแอพบนมือถือ
+                </h3>
+                <p className="text-[12px] text-on-surface-variant mt-0.5">
+                  {isStandalone
+                    ? "กำลังเปิดใช้งานในโหมดแอพเต็มจอบนเครื่องนี้แล้ว"
+                    : "เพิ่มไอคอน DenewStock ลงหน้าจอหลัก (iPhone / Android) เปิดเต็มจอทันที"}
+                </p>
+              </div>
+            </div>
+            {isStandalone ? (
+              <span className="px-2.5 py-1 rounded-full bg-secondary-container text-on-secondary-container text-[11px] font-bold shrink-0">
+                ติดตั้งแล้ว
+              </span>
+            ) : (
+              onInstallApp && (
+                <button
+                  type="button"
+                  onClick={onInstallApp}
+                  className="h-10 px-3.5 rounded-xl bg-primary hover:bg-primary-dim text-on-primary text-[12.5px] font-semibold flex items-center gap-1.5 shadow-sm transition-colors shrink-0 cursor-pointer active:scale-95"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    install_mobile
+                  </span>
+                  <span>ติดตั้งแอพ</span>
+                </button>
+              )
+            )}
+          </div>
+
           {/* Online Cloud Sync Card */}
           <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/40 shadow-sm flex flex-col gap-3">
             <div className="flex items-start justify-between gap-2">

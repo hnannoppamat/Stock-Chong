@@ -56,10 +56,10 @@ export function BottomNav({
   return (
     <nav
       aria-label="แถบนำทางล่าง"
-      className="md:hidden fixed bottom-0 left-0 right-0 z-50 pb-safe bg-surface/90 backdrop-blur-xl shadow-[0_-1px_8px_rgba(0,0,0,0.04)] border-t border-outline-variant/20"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-50 pb-safe bg-surface/95 backdrop-blur-xl shadow-[0_-2px_14px_rgba(225,29,116,0.08)] border-t border-outline-variant/35 select-none"
     >
       <div
-        className={`grid items-center h-16 px-0.5 ${
+        className={`grid items-center h-[64px] px-1 ${
           role === "owner" ? "grid-cols-6" : "grid-cols-5"
         }`}
       >
@@ -71,27 +71,33 @@ export function BottomNav({
               type="button"
               onClick={() => onTabChange(tab.id)}
               aria-current={isActive ? "page" : undefined}
-              className={`relative flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] px-1 transition-colors cursor-pointer ${
+              className={`relative flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[52px] px-0.5 transition-all active:scale-95 cursor-pointer ${
                 isActive
                   ? "text-primary font-semibold"
                   : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
               <span
-                className={`material-symbols-outlined text-[22px] ${
-                  isActive ? "material-symbols-filled" : ""
+                className={`relative flex items-center justify-center w-11 h-7 rounded-full transition-colors ${
+                  isActive ? "bg-primary-fixed/85" : "bg-transparent"
                 }`}
               >
-                {tab.icon}
+                <span
+                  className={`material-symbols-outlined text-[21px] ${
+                    isActive ? "material-symbols-filled" : ""
+                  }`}
+                >
+                  {tab.icon}
+                </span>
+                {tab.badge !== undefined && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-error text-on-error text-[9px] font-bold flex items-center justify-center tabular-nums shadow-xs">
+                    {tab.badge > 99 ? "99+" : tab.badge}
+                  </span>
+                )}
               </span>
               <span className="text-[10px] leading-[13px] tracking-[0.01em] whitespace-nowrap truncate max-w-full">
                 {tab.label}
               </span>
-              {tab.badge !== undefined && (
-                <span className="absolute top-1 right-2 min-w-[15px] h-[15px] px-1 rounded-full bg-error text-on-error text-[9px] font-semibold flex items-center justify-center tabular-nums">
-                  {tab.badge}
-                </span>
-              )}
             </button>
           );
         })}

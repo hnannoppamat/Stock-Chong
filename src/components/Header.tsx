@@ -23,6 +23,8 @@ interface HeaderProps {
   liveStatus: "connected" | "connecting" | "reconnecting" | "offline";
   onlineDevicesCount: number;
   onCloudSyncClick: () => void;
+  isStandalone?: boolean;
+  onInstallApp?: () => void;
 }
 
 export function Header({
@@ -47,6 +49,8 @@ export function Header({
   liveStatus,
   onlineDevicesCount,
   onCloudSyncClick,
+  isStandalone = false,
+  onInstallApp,
 }: HeaderProps) {
   const [openNoti, setOpenNoti] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -90,20 +94,20 @@ export function Header({
   ];
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-surface/90 backdrop-blur-xl shadow-[0_1px_10px_rgba(225,29,116,0.08)] border-b border-outline-variant/40 pt-safe">
-      <div className="h-14 md:h-16 max-w-6xl mx-auto px-4 md:px-6 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2 shrink-0">
+    <header className="fixed top-0 left-0 right-0 z-50 bg-surface/92 backdrop-blur-xl shadow-[0_1px_10px_rgba(225,29,116,0.08)] border-b border-outline-variant/40 pt-safe select-none">
+      <div className="h-14 md:h-16 max-w-6xl mx-auto px-3 sm:px-4 md:px-6 flex items-center justify-between gap-2 md:gap-4">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink">
           <button
             type="button"
             onClick={() => onTabChange("dashboard")}
-            className="text-[16px] leading-6 font-bold text-primary tracking-tight whitespace-nowrap cursor-pointer"
+            className="text-[16px] leading-6 font-bold text-primary tracking-tight whitespace-nowrap cursor-pointer active:opacity-80"
           >
             DenewStock
           </button>
           <button
             type="button"
             onClick={() => onTabChange("owner-auth")}
-            className={`px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+            className={`px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap truncate max-w-[84px] sm:max-w-[120px] transition-colors cursor-pointer active:scale-95 ${
               role === "owner"
                 ? "bg-primary-fixed text-on-primary-fixed"
                 : "bg-secondary-container text-on-secondary-container"
@@ -152,10 +156,15 @@ export function Header({
           })}
         </nav>
 
-        <div className="flex items-center gap-1.5 shrink-0 relative" ref={popoverRef}>
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 relative" ref={popoverRef}>
           <button
             type="button"
             onClick={onCloudSyncClick}
+            aria-label={
+              liveStatus === "connected"
+                ? `ออนไลน์พร้อมกัน ${onlineDevicesCount} เครื่อง`
+                : "จัดการการใช้งานหลายเครื่อง"
+            }
             title={
               liveStatus === "connected"
                 ? `ออนไลน์พร้อมกัน ${onlineDevicesCount} เครื่อง${
@@ -165,7 +174,7 @@ export function Header({
                   }`
                 : "จัดการการใช้งานพร้อมกันหลายเครื่อง & ซิงก์คลาวด์"
             }
-            className={`h-9 px-2.5 rounded-full text-[11.5px] font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+            className={`h-9 px-2 sm:px-2.5 rounded-full text-[11.5px] font-semibold flex items-center gap-1 sm:gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer active:scale-95 border ${
               liveStatus === "connected" || cloudStatus === "connected"
                 ? "bg-secondary-container/75 text-on-secondary-container border-secondary/35 hover:bg-secondary-container"
                 : liveStatus === "connecting" || liveStatus === "reconnecting"
@@ -191,19 +200,38 @@ export function Header({
               {cloudStatus === "connected" ? "cloud_done" : "devices"}
             </span>
             <span className="tabular-nums">
-              {liveStatus === "connected"
-                ? `${onlineDevicesCount} เครื่อง`
-                : liveStatus === "connecting" || liveStatus === "reconnecting"
-                  ? "กำลังเชื่อม..."
-                  : "หลายเครื่อง"}
+              {liveStatus === "connected" ? (
+                <>
+                  {onlineDevicesCount}
+                  <span className="hidden sm:inline"> เครื่อง</span>
+                </>
+              ) : liveStatus === "connecting" || liveStatus === "reconnecting" ? (
+                <span className="hidden sm:inline">กำลังเชื่อม...</span>
+              ) : (
+                <span className="hidden sm:inline">หลายเครื่อง</span>
+              )}
             </span>
           </button>
+
+          {!isStandalone && onInstallApp && (
+            <button
+              type="button"
+              onClick={onInstallApp}
+              aria-label="ติดตั้งแอพลงหน้าจอมือถือ"
+              title="ติดตั้งแอพลงหน้าจอมือถือ"
+              className="md:hidden w-9 h-9 rounded-full bg-primary-fixed text-on-primary-fixed hover:bg-primary hover:text-on-primary flex items-center justify-center transition-colors shrink-0 cursor-pointer active:scale-95"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                install_mobile
+              </span>
+            </button>
+          )}
 
           {role === "owner" ? (
             <button
               type="button"
               onClick={onEnterStaffMode}
-              className="h-9 px-3 rounded-full bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary text-[12px] font-semibold flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer active:scale-95"
+              className="hidden sm:flex h-9 px-3 rounded-full bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary text-[12px] font-semibold items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer active:scale-95"
             >
               <span className="material-symbols-outlined text-[16px]">badge</span>
               <span>พนักงานเข้าใช้งาน</span>
@@ -212,7 +240,7 @@ export function Header({
             <button
               type="button"
               onClick={() => onTabChange("owner-auth")}
-              className="h-9 px-3 rounded-full bg-primary-fixed text-on-primary-fixed hover:bg-primary hover:text-on-primary text-[12px] font-semibold flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer active:scale-95"
+              className="hidden sm:flex h-9 px-3 rounded-full bg-primary-fixed text-on-primary-fixed hover:bg-primary hover:text-on-primary text-[12px] font-semibold items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer active:scale-95"
             >
               <span className="material-symbols-outlined text-[16px]">lock_open</span>
               <span>เข้าเจ้าของร้าน</span>
@@ -223,7 +251,7 @@ export function Header({
             type="button"
             aria-label="เปิดผู้ช่วย AI"
             onClick={onOpenAiChat}
-            className={`h-9 px-2.5 rounded-full flex items-center gap-1 text-[12px] font-semibold transition-all cursor-pointer active:scale-95 border shrink-0 ${
+            className={`h-9 w-9 sm:w-auto sm:px-2.5 rounded-full flex items-center justify-center gap-1 text-[12px] font-semibold transition-all cursor-pointer active:scale-95 border shrink-0 ${
               isAiChatOpen
                 ? "bg-primary text-on-primary border-primary shadow-sm"
                 : "bg-secondary-container/80 text-on-secondary-container border-secondary/40 hover:bg-secondary-container"
@@ -239,7 +267,7 @@ export function Header({
             type="button"
             aria-label="การแจ้งเตือน"
             onClick={() => setOpenNoti((prev) => !prev)}
-            className="relative w-10 h-10 flex items-center justify-center text-on-surface-variant hover:text-on-surface rounded-full transition-colors cursor-pointer"
+            className="relative w-10 h-10 flex items-center justify-center text-on-surface-variant hover:text-on-surface rounded-full transition-colors cursor-pointer active:scale-95"
           >
             <span className="material-symbols-outlined text-[22px]">notifications</span>
             {totalAlertCount > 0 && (
@@ -253,7 +281,7 @@ export function Header({
             type="button"
             aria-label="สลับโหมดผู้ใช้งาน"
             onClick={() => onTabChange("owner-auth")}
-            className={`w-8 h-8 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer ${
+            className={`hidden sm:flex w-8 h-8 rounded-full items-center justify-center transition-transform active:scale-95 cursor-pointer ${
               role === "owner"
                 ? "bg-primary text-on-primary"
                 : "bg-secondary-container text-on-secondary-container border border-secondary/30"
@@ -265,7 +293,7 @@ export function Header({
           </button>
 
           {openNoti && (
-            <div className="absolute right-0 top-13 w-84 max-w-[calc(100vw-2rem)] bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/60 p-3 z-50">
+            <div className="fixed sm:absolute right-3 sm:right-0 top-[calc(3.75rem+env(safe-area-inset-top))] sm:top-13 w-[calc(100vw-1.5rem)] sm:w-88 max-w-md bg-surface-container-lowest rounded-2xl sm:rounded-xl shadow-xl border border-outline-variant/60 p-3 z-50">
               <div className="flex items-center justify-between pb-2 border-b border-surface-container gap-2">
                 <span className="text-[14px] font-semibold text-on-surface">
                   การแจ้งเตือน ({totalAlertCount})

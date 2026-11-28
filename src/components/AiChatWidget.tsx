@@ -334,10 +334,10 @@ export function AiChatWidget({
         <div
           role="dialog"
           aria-label="ผู้ช่วย AI ร้าน DenewStock"
-          className="fixed inset-x-0 bottom-0 top-14 z-50 md:inset-auto md:bottom-6 md:right-6 md:w-[430px] md:max-w-[calc(100vw-2rem)] md:h-[640px] md:max-h-[calc(100vh-5.5rem)] bg-surface-container-lowest md:rounded-2xl shadow-[0_20px_60px_rgba(61,20,40,0.24)] border-t md:border border-outline-variant/80 flex flex-col overflow-hidden"
+          className="fixed inset-0 z-[60] md:inset-auto md:bottom-6 md:right-6 md:w-[430px] md:max-w-[calc(100vw-2rem)] md:h-[640px] md:max-h-[calc(100vh-5.5rem)] bg-surface-container-lowest md:rounded-2xl shadow-[0_20px_60px_rgba(61,20,40,0.24)] md:border border-outline-variant/80 flex flex-col overflow-hidden"
         >
           {/* Top Bar */}
-          <div className="px-4 py-3 bg-gradient-to-r from-primary to-primary-container text-on-primary flex items-center justify-between gap-2 shrink-0">
+          <div className="px-4 py-3 pt-safe md:pt-3 bg-gradient-to-r from-primary to-primary-container text-on-primary flex items-center justify-between gap-2 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-9 h-9 rounded-xl bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0 shadow-sm">
                 <span className="material-symbols-outlined text-[20px] material-symbols-filled">
