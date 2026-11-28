@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { AppNotification, ProductItem, RoleMode, TabId } from "../types";
+import { GoogleLogoSvg } from "./GoogleLoginScreen";
 
 interface HeaderProps {
   role: RoleMode;
@@ -10,8 +11,6 @@ interface HeaderProps {
   onOpenAiChat: () => void;
   isAiChatOpen: boolean;
   lowStockProducts: ProductItem[];
-  ownerLineId: string;
-  onNotifyLowStockLine: (products: ProductItem[]) => void;
   onSelectLowStockProduct: (product: ProductItem) => void;
   notifications: AppNotification[];
   onMarkAllRead: () => void;
@@ -20,9 +19,15 @@ interface HeaderProps {
   onSelectNotification: (noti: AppNotification) => void;
   cloudStatus: "connected" | "connecting" | "local";
   cloudUserEmail?: string | null;
+  cloudUserName?: string | null;
+  cloudUserPhoto?: string | null;
   liveStatus: "connected" | "connecting" | "reconnecting" | "offline";
   onlineDevicesCount: number;
   onCloudSyncClick: () => void;
+  onConnectCloud?: () => void;
+  onDisconnectCloud?: () => void;
+  onSyncAllToCloud?: () => void;
+  isSyncingCloudAll?: boolean;
   isStandalone?: boolean;
   onInstallApp?: () => void;
 }
@@ -36,8 +41,6 @@ export function Header({
   onOpenAiChat,
   isAiChatOpen,
   lowStockProducts,
-  ownerLineId,
-  onNotifyLowStockLine,
   onSelectLowStockProduct,
   notifications,
   onMarkAllRead,
@@ -46,13 +49,20 @@ export function Header({
   onSelectNotification,
   cloudStatus,
   cloudUserEmail,
+  cloudUserName,
+  cloudUserPhoto,
   liveStatus,
   onlineDevicesCount,
   onCloudSyncClick,
+  onConnectCloud,
+  onDisconnectCloud,
+  onSyncAllToCloud,
+  isSyncingCloudAll = false,
   isStandalone = false,
   onInstallApp,
 }: HeaderProps) {
   const [openNoti, setOpenNoti] = useState(false);
+  const [openAccount, setOpenAccount] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -62,13 +72,14 @@ export function Header({
     function handleOutsideClick(e: MouseEvent) {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setOpenNoti(false);
+        setOpenAccount(false);
       }
     }
-    if (openNoti) {
+    if (openNoti || openAccount) {
       document.addEventListener("mousedown", handleOutsideClick);
     }
     return () => document.removeEventListener("mousedown", handleOutsideClick);
-  }, [openNoti]);
+  }, [openNoti, openAccount]);
 
   const roleTabLabel = role === "staff" ? "พนักงาน" : ownerName;
   const roleTabIcon = role === "staff" ? "badge" : "admin_panel_settings";
@@ -94,7 +105,7 @@ export function Header({
   ];
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-surface/92 backdrop-blur-xl shadow-[0_1px_10px_rgba(225,29,116,0.08)] border-b border-outline-variant/40 pt-safe select-none">
+    <header className="fixed top-0 left-0 right-0 z-50 bg-surface/92 backdrop-blur-xl shadow-[0_1px_10px_rgba(174,84,130,0.08)] border-b border-outline-variant/40 pt-safe select-none">
       <div className="h-14 md:h-16 max-w-6xl mx-auto px-3 sm:px-4 md:px-6 flex items-center justify-between gap-2 md:gap-4">
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink">
           <button
@@ -213,20 +224,6 @@ export function Header({
             </span>
           </button>
 
-          {!isStandalone && onInstallApp && (
-            <button
-              type="button"
-              onClick={onInstallApp}
-              aria-label="ติดตั้งแอพลงหน้าจอมือถือ"
-              title="ติดตั้งแอพลงหน้าจอมือถือ"
-              className="md:hidden w-9 h-9 rounded-full bg-primary-fixed text-on-primary-fixed hover:bg-primary hover:text-on-primary flex items-center justify-center transition-colors shrink-0 cursor-pointer active:scale-95"
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                install_mobile
-              </span>
-            </button>
-          )}
-
           {role === "owner" ? (
             <button
               type="button"
@@ -266,8 +263,11 @@ export function Header({
           <button
             type="button"
             aria-label="การแจ้งเตือน"
-            onClick={() => setOpenNoti((prev) => !prev)}
-            className="relative w-10 h-10 flex items-center justify-center text-on-surface-variant hover:text-on-surface rounded-full transition-colors cursor-pointer active:scale-95"
+            onClick={() => {
+              setOpenAccount(false);
+              setOpenNoti((prev) => !prev);
+            }}
+            className="relative w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-on-surface-variant hover:text-on-surface rounded-full transition-colors cursor-pointer active:scale-95"
           >
             <span className="material-symbols-outlined text-[22px]">notifications</span>
             {totalAlertCount > 0 && (
@@ -277,20 +277,118 @@ export function Header({
             )}
           </button>
 
-          <button
-            type="button"
-            aria-label="สลับโหมดผู้ใช้งาน"
-            onClick={() => onTabChange("owner-auth")}
-            className={`hidden sm:flex w-8 h-8 rounded-full items-center justify-center transition-transform active:scale-95 cursor-pointer ${
-              role === "owner"
-                ? "bg-primary text-on-primary"
-                : "bg-secondary-container text-on-secondary-container border border-secondary/30"
-            }`}
-          >
-            <span className="material-symbols-outlined text-[18px]">
-              {role === "owner" ? "person" : "badge"}
-            </span>
-          </button>
+          {cloudUserEmail ? (
+            <button
+              type="button"
+              aria-label="บัญชีที่เข้าสู่ระบบ"
+              title={`บัญชีร้าน: ${cloudUserEmail}`}
+              onClick={() => {
+                setOpenNoti(false);
+                setOpenAccount((prev) => !prev);
+              }}
+              className="w-9 h-9 rounded-full overflow-hidden border-2 border-primary/40 hover:border-primary flex items-center justify-center bg-primary-fixed text-on-primary-fixed font-bold text-[13px] shrink-0 transition-all active:scale-95 cursor-pointer"
+            >
+              {cloudUserPhoto ? (
+                <img
+                  src={cloudUserPhoto}
+                  alt={cloudUserName || cloudUserEmail}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>
+                  {(cloudUserName || cloudUserEmail).charAt(0).toUpperCase()}
+                </span>
+              )}
+            </button>
+          ) : (
+            onConnectCloud && (
+              <button
+                type="button"
+                disabled={cloudStatus === "connecting"}
+                onClick={onConnectCloud}
+                aria-label="เข้าสู่ระบบด้วย Google"
+                title="เข้าสู่ระบบด้วย Google เพื่อบันทึกขึ้น Firebase"
+                className="h-9 px-2.5 rounded-full bg-white hover:bg-surface-container-low text-[#1f1f1f] border border-outline-variant text-[12px] font-semibold flex items-center gap-1.5 shrink-0 shadow-xs transition-all active:scale-95 cursor-pointer disabled:opacity-60"
+              >
+                <GoogleLogoSvg className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">ล็อกอิน Google</span>
+              </button>
+            )
+          )}
+
+          {openAccount && cloudUserEmail && (
+            <div className="fixed sm:absolute right-3 sm:right-0 top-[calc(3.75rem+env(safe-area-inset-top))] sm:top-13 w-[calc(100vw-1.5rem)] sm:w-76 max-w-sm bg-surface-container-lowest rounded-2xl sm:rounded-xl shadow-xl border border-outline-variant/60 p-3.5 z-50 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full overflow-hidden border border-outline-variant/60 bg-primary-fixed text-on-primary-fixed font-bold flex items-center justify-center shrink-0">
+                  {cloudUserPhoto ? (
+                    <img
+                      src={cloudUserPhoto}
+                      alt={cloudUserName || cloudUserEmail}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span>
+                      {(cloudUserName || cloudUserEmail).charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13.5px] font-bold text-on-surface truncate">
+                    {cloudUserName || "บัญชีร้านค้า"}
+                  </p>
+                  <p className="text-[11.5px] text-on-surface-variant truncate">
+                    {cloudUserEmail}
+                  </p>
+                  <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-semibold">
+                    <span className="material-symbols-outlined text-[12px]">
+                      cloud_done
+                    </span>
+                    <span>บันทึกบน Firebase อัตโนมัติ</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-surface-container">
+                {onSyncAllToCloud && (
+                  <button
+                    type="button"
+                    disabled={isSyncingCloudAll}
+                    onClick={() => {
+                      setOpenAccount(false);
+                      onSyncAllToCloud();
+                    }}
+                    className="w-full h-9 px-3 rounded-xl bg-primary-fixed/60 hover:bg-primary-fixed text-on-primary-fixed text-[12.5px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+                  >
+                    <span
+                      className={`material-symbols-outlined text-[16px] ${
+                        isSyncingCloudAll ? "animate-spin" : ""
+                      }`}
+                    >
+                      {isSyncingCloudAll ? "progress_activity" : "cloud_sync"}
+                    </span>
+                    <span>ซิงก์ข้อมูลทั้งหมดขึ้น Firebase</span>
+                  </button>
+                )}
+                {onDisconnectCloud && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenAccount(false);
+                      onDisconnectCloud();
+                    }}
+                    className="w-full h-9 px-3 rounded-xl bg-surface-container-low hover:bg-error-container hover:text-error text-on-surface text-[12.5px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">
+                      logout
+                    </span>
+                    <span>ออกจากระบบ</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {openNoti && (
             <div className="fixed sm:absolute right-3 sm:right-0 top-[calc(3.75rem+env(safe-area-inset-top))] sm:top-13 w-[calc(100vw-1.5rem)] sm:w-88 max-w-md bg-surface-container-lowest rounded-2xl sm:rounded-xl shadow-xl border border-outline-variant/60 p-3 z-50">
@@ -336,19 +434,6 @@ export function Header({
                       </span>
                     </span>
                     <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onNotifyLowStockLine(lowStockProducts);
-                          setOpenNoti(false);
-                        }}
-                        className="px-2 py-0.5 rounded-md bg-[#06C755] hover:bg-[#05b34c] text-white text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[12px]">
-                          chat
-                        </span>
-                        <span>แจ้ง LINE</span>
-                      </button>
                       <button
                         type="button"
                         onClick={() => {

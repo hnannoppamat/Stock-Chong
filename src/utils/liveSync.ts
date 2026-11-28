@@ -134,11 +134,11 @@ export function persistRoomId(roomId: string): string {
   return clean;
 }
 
-export function buildShareableRoomUrl(roomId: string): string {
+export function buildAppShareUrl(): string {
   try {
     const url = new URL(window.location.href);
     url.hash = "";
-    url.searchParams.set("room", sanitizeLiveRoomId(roomId));
+    url.searchParams.delete("room");
     return url.toString();
   } catch {
     return "";
@@ -151,6 +151,7 @@ export interface LiveSyncClientOptions {
   deviceName: string;
   deviceType: DeviceFormFactor;
   roleMode: RoleMode;
+  getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
   getHydrateSnapshot: () => Omit<LiveStoreSnapshot, "version">;
   onStatusChange: (status: LiveConnectionStatus) => void;
   onInitState: (state: LiveStoreSnapshot) => void;
@@ -172,6 +173,8 @@ interface QueuedAction {
 export class LiveSyncClient {
   private ws: WebSocket | null = null;
   private closed = false;
+  private authenticated = false;
+  private forceTokenRefreshNext = false;
   private reconnectAttempts = 0;
   private reconnectTimer: number | null = null;
   private pingInterval: number | null = null;
@@ -285,14 +288,13 @@ export class LiveSyncClient {
 
   private buildWsUrl(): string {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.host}/ws/sync?room=${encodeURIComponent(
-      this.opts.roomId
-    )}`;
+    return `${protocol}//${window.location.host}/ws/sync`;
   }
 
   private connect() {
     if (this.closed) return;
     this.clearPingTimers();
+    this.authenticated = false;
     this.opts.onStatusChange(
       this.reconnectAttempts === 0 ? "connecting" : "reconnecting"
     );
@@ -307,36 +309,33 @@ export class LiveSyncClient {
 
     this.ws = ws;
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
       if (this.closed) {
         ws.close();
         return;
       }
-      this.reconnectAttempts = 0;
-      this.opts.onStatusChange("connected");
+
+      const forceRefresh = this.forceTokenRefreshNext;
+      this.forceTokenRefreshNext = false;
+      const idToken = await this.opts.getIdToken(forceRefresh).catch(() => null);
+      if (this.closed || ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      if (!idToken) {
+        ws.close(4401, "No auth token");
+        return;
+      }
 
       ws.send(
         JSON.stringify({
           type: "presence:hello",
+          idToken,
           deviceId: this.opts.deviceId,
           deviceName: this.opts.deviceName,
           deviceType: this.opts.deviceType,
           roleMode: this.opts.roleMode,
         })
       );
-
-      this.startPingLoop();
-
-      // Flush any actions queued while briefly disconnected
-      if (this.pendingQueue.length > 0) {
-        const queued = [...this.pendingQueue];
-        this.pendingQueue = [];
-        for (const item of queued) {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(item));
-          }
-        }
-      }
     };
 
     ws.onmessage = (event) => {
@@ -344,6 +343,12 @@ export class LiveSyncClient {
       try {
         msg = JSON.parse(String(event.data)) as Record<string, unknown>;
       } catch {
+        return;
+      }
+
+      if (msg.type === "auth:error") {
+        this.authenticated = false;
+        this.forceTokenRefreshNext = true;
         return;
       }
 
@@ -360,6 +365,19 @@ export class LiveSyncClient {
       }
 
       if (msg.type === "room:init") {
+        if (!this.authenticated) {
+          this.authenticated = true;
+          this.reconnectAttempts = 0;
+          this.opts.onStatusChange("connected");
+          this.startPingLoop();
+          if (this.pendingQueue.length > 0 && ws.readyState === WebSocket.OPEN) {
+            const queued = [...this.pendingQueue];
+            this.pendingQueue = [];
+            for (const item of queued) {
+              ws.send(JSON.stringify(item));
+            }
+          }
+        }
         if (Array.isArray(msg.devices)) {
           this.opts.onPresenceChange(msg.devices as ConnectedDevice[]);
         }
@@ -369,9 +387,6 @@ export class LiveSyncClient {
             this.opts.onActivityEvents?.(snapshot.recentEvents);
           }
           this.opts.onInitState(snapshot);
-        } else if (!msg.initialized) {
-          // First device in a brand-new room hydrates server authoritative state
-          this.hydrateRoom(this.opts.getHydrateSnapshot(), false);
         }
         return;
       }
@@ -407,11 +422,15 @@ export class LiveSyncClient {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.closed) return;
+      this.authenticated = false;
       this.clearPingTimers();
       this.opts.onLatencyChange?.(null);
       this.ws = null;
+      if (ev.code === 4401) {
+        this.forceTokenRefreshNext = true;
+      }
       this.scheduleReconnect();
     };
 
@@ -503,7 +522,7 @@ export class LiveSyncClient {
       syncedToCloud,
     };
 
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.authenticated && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(packet));
     } else {
       this.pendingQueue = [...this.pendingQueue.slice(-49), packet];

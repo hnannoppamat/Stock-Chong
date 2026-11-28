@@ -120,7 +120,6 @@ export interface StockApprovalRequest {
   reason: string;
   createdAt: string;
   status: "pending" | "approved" | "rejected";
-  notifiedLineId?: string;
 }
 
 export interface AppNotification {
@@ -185,7 +184,6 @@ export interface LiveStoreSnapshot {
   version: number;
   ownerName: string;
   ownerPin: string;
-  ownerLineId: string;
   promptPayId?: string;
   promptPayName?: string;
   categories: string[];

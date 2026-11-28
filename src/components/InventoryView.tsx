@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ProductItem, RoleMode } from "../types";
+import { Order, ProductItem, RoleMode } from "../types";
+import { exportStockAndSalesReportCsv } from "../utils/csvExport";
 import { ResilientImage } from "./ResilientImage";
 
 type StockFilterMode = "all" | "low" | "normal" | "out";
@@ -13,13 +14,13 @@ type SortMode =
 interface InventoryViewProps {
   role: RoleMode;
   products: ProductItem[];
+  orders: Order[];
   categories: string[];
-  ownerLineId: string;
   initialStockFilter?: "all" | "low";
   onConsumeInitialFilter?: () => void;
-  onNotifyLowStockLine: (items: ProductItem[]) => void;
   lastSyncedLabel: string;
   onSyncNow: () => void;
+  onNotify?: (msg: string, icon?: string) => void;
   onQuickCreateOrderForProduct: (product: ProductItem) => void;
   onNavigateAccounting: () => void;
   onOpenAddProduct: () => void;
@@ -32,13 +33,13 @@ interface InventoryViewProps {
 export function InventoryView({
   role,
   products,
+  orders,
   categories,
-  ownerLineId,
   initialStockFilter,
   onConsumeInitialFilter,
-  onNotifyLowStockLine,
   lastSyncedLabel,
   onSyncNow,
+  onNotify,
   onQuickCreateOrderForProduct,
   onNavigateAccounting,
   onOpenAddProduct,
@@ -168,6 +169,14 @@ export function InventoryView({
     setTimeout(() => setSyncing(false), 600);
   };
 
+  const handleExportStockReportCsv = () => {
+    const result = exportStockAndSalesReportCsv(products, orders);
+    onNotify?.(
+      `ดาวน์โหลดรายงานสต็อกและประวัติการขายแล้ว (สินค้า ${result.productCount} รุ่น, ออเดอร์ ${result.orderCount} รายการ)`,
+      "download"
+    );
+  };
+
   const handleAddCategorySubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = newCategoryName.trim();
@@ -203,29 +212,29 @@ export function InventoryView({
           </button>
 
           {role === "owner" && (
-            <button
-              type="button"
-              onClick={onNavigateAccounting}
-              className="h-10 px-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/50 text-primary hover:bg-surface-container-low text-[13px] font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                account_balance_wallet
-              </span>
-              <span>ระบบบัญชี</span>
-            </button>
-          )}
+            <>
+              <button
+                type="button"
+                onClick={handleExportStockReportCsv}
+                className="h-10 px-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/50 text-on-surface hover:bg-surface-container-low text-[13px] font-semibold flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+              >
+                <span className="material-symbols-outlined text-[18px] text-secondary">
+                  download
+                </span>
+                <span>ดาวน์โหลดรายงานสต็อก (CSV)</span>
+              </button>
 
-          {lowStockItems.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onNotifyLowStockLine(lowStockItems)}
-              className="h-10 px-3.5 rounded-xl bg-[#06C755] hover:bg-[#05b34c] text-white text-[12px] font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-            >
-              <span className="material-symbols-outlined text-[16px]">
-                chat
-              </span>
-              <span>แจ้ง LINE ({ownerLineId})</span>
-            </button>
+              <button
+                type="button"
+                onClick={onNavigateAccounting}
+                className="h-10 px-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/50 text-primary hover:bg-surface-container-low text-[13px] font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  account_balance_wallet
+                </span>
+                <span>ระบบบัญชี</span>
+              </button>
+            </>
           )}
 
           <button
@@ -335,7 +344,7 @@ export function InventoryView({
               ส่งคำขออนุมัติ
             </p>
             <p className="text-[11px] text-on-surface-variant mt-0.5">
-              แจ้ง LINE ({ownerLineId}) เมื่อขอแก้จำนวน
+              ส่งคำขอให้เจ้าของร้านอนุมัติในระบบ
             </p>
           </div>
         )}
@@ -642,18 +651,6 @@ export function InventoryView({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {filteredProducts.length > 0 && (
-              <button
-                type="button"
-                onClick={() => onNotifyLowStockLine(filteredProducts)}
-                className="h-8 px-3 rounded-lg bg-[#06C755] hover:bg-[#05b34c] text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
-              >
-                <span className="material-symbols-outlined text-[15px]">
-                  chat
-                </span>
-                <span>แจ้งเตือน LINE ({ownerLineId})</span>
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setStockFilter("all")}

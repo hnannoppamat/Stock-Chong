@@ -9,7 +9,10 @@ service cloud.firestore {
 
     // --- Global Hardened Helpers (Phase 3) ---
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null && (
+        request.auth.token.email_verified == true ||
+        request.auth.token.firebase.sign_in_provider == 'password'
+      );
     }
 
     function isValidId(id) {
@@ -30,7 +33,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'hnan.noppamat@gmail.com' ||
+        (request.auth.token.email == 'hnan.noppamat@gmail.com' && request.auth.token.email_verified == true) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }

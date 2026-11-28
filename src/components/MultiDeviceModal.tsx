@@ -1,15 +1,12 @@
 import { useState } from "react";
 import { ConnectedDevice } from "../types";
 import {
-  buildShareableRoomUrl,
-  DEFAULT_LIVE_ROOM_ID,
+  buildAppShareUrl,
   LiveConnectionStatus,
-  sanitizeLiveRoomId,
 } from "../utils/liveSync";
 
 interface MultiDeviceModalProps {
   liveStatus: LiveConnectionStatus;
-  roomId: string;
   currentDeviceId: string;
   currentDeviceName: string;
   devices: ConnectedDevice[];
@@ -23,7 +20,6 @@ interface MultiDeviceModalProps {
     accounting: number;
   };
   onRenameDevice: (nextName: string) => void;
-  onChangeRoom: (nextRoomId: string) => void;
   onConnectCloud: () => void;
   onDisconnectCloud: () => void;
   onSyncAllToCloud?: () => void;
@@ -33,7 +29,6 @@ interface MultiDeviceModalProps {
 
 export function MultiDeviceModal({
   liveStatus,
-  roomId,
   currentDeviceId,
   currentDeviceName,
   devices,
@@ -42,7 +37,6 @@ export function MultiDeviceModal({
   isSyncingCloudAll = false,
   cloudRecordCounts,
   onRenameDevice,
-  onChangeRoom,
   onConnectCloud,
   onDisconnectCloud,
   onSyncAllToCloud,
@@ -50,17 +44,16 @@ export function MultiDeviceModal({
   onClose,
 }: MultiDeviceModalProps) {
   const [nameInput, setNameInput] = useState(currentDeviceName);
-  const [roomInput, setRoomInput] = useState(roomId);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const shareUrl = buildShareableRoomUrl(roomId);
+  const shareUrl = buildAppShareUrl();
 
   const handleCopyShareLink = async () => {
     if (!shareUrl) return;
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopiedLink(true);
-      onNotify("คัดลอกลิงก์ใช้งานร่วมกันแล้ว ส่งให้เครื่องอื่นเปิดได้เลย", "link");
+      onNotify("คัดลอกลิงก์แอพแล้ว เปิดบนเครื่องอื่นแล้วเข้าสู่ระบบด้วยบัญชีเดียวกันได้เลย", "link");
       window.setTimeout(() => setCopiedLink(false), 2200);
     } catch {
       onNotify("กรุณาคัดลอกลิงก์จากช่องด้านล่าง", "info");
@@ -71,16 +64,6 @@ export function MultiDeviceModal({
     const trimmed = nameInput.trim();
     if (!trimmed) return;
     onRenameDevice(trimmed);
-  };
-
-  const handleSwitchRoom = () => {
-    const clean = sanitizeLiveRoomId(roomInput);
-    setRoomInput(clean);
-    if (clean === roomId) {
-      onNotify(`เชื่อมต่อห้อง "${clean}" อยู่แล้ว`, "check_circle");
-      return;
-    }
-    onChangeRoom(clean);
   };
 
   const deviceIcon = (type: ConnectedDevice["deviceType"]) => {
@@ -164,16 +147,18 @@ export function MultiDeviceModal({
             <div className="flex items-center justify-between gap-2">
               <span className="text-[13px] font-bold text-on-surface flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-[18px] text-primary">
-                  share
+                  lock
                 </span>
-                ลิงก์เปิดใช้งานร่วมกันบนเครื่องอื่น
+                ลิงก์เปิดใช้งานบนเครื่องอื่น (เฉพาะบัญชีเดียวกัน)
               </span>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface-variant">
-                ห้อง: {roomId}
-              </span>
+              {cloudUserEmail && (
+                <span className="text-[10.5px] font-medium px-2 py-0.5 rounded-md bg-secondary-container text-on-secondary-container truncate max-w-[170px]">
+                  {cloudUserEmail}
+                </span>
+              )}
             </div>
             <p className="text-[12px] text-on-surface-variant leading-relaxed">
-              ส่งลิงก์นี้ให้มือถือพนักงาน แท็บเล็ตโต๊ะแพ็ค หรือคอมพิวเตอร์หน้าร้านเปิดได้เลย ไม่ต้องล็อกอินก็ทำงานร่วมกันแบบเรียลไทม์ทันที
+              เปิดลิงก์นี้บนมือถือ แท็บเล็ต หรือคอมพิวเตอร์เครื่องอื่น แล้วเข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่านเดียวกัน ({cloudUserEmail || "บัญชีร้าน"}) ข้อมูลร้านทั้งหมดจะแสดงตรงกันและซิงก์แบบเรียลไทม์ทันที
             </p>
             <div className="flex items-center gap-2">
               <input
@@ -279,50 +264,6 @@ export function MultiDeviceModal({
                 className="px-3.5 py-2 rounded-lg bg-surface-container-highest hover:bg-primary hover:text-on-primary text-on-surface text-[12.5px] font-semibold transition-colors shrink-0"
               >
                 บันทึกชื่อ
-              </button>
-            </div>
-          </div>
-
-          {/* Room Switcher (Optional Multi-Branch) */}
-          <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <label className="text-[12.5px] font-bold text-on-surface">
-                รหัสห้องร้านค้า (Room Code)
-              </label>
-              {roomId !== DEFAULT_LIVE_ROOM_ID && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRoomInput(DEFAULT_LIVE_ROOM_ID);
-                    onChangeRoom(DEFAULT_LIVE_ROOM_ID);
-                  }}
-                  className="text-[11px] font-semibold text-primary hover:underline"
-                >
-                  กลับห้องหลัก
-                </button>
-              )}
-            </div>
-            <p className="text-[11.5px] text-on-surface-variant">
-              ทุกเครื่องที่ใส่รหัสห้องเดียวกันจะซิงก์ข้อมูลชุดเดียวกันแบบสดทันที
-            </p>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={roomInput}
-                onChange={(e) => setRoomInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSwitchRoom();
-                }}
-                placeholder="denewstock-main"
-                maxLength={48}
-                className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-mono text-on-surface focus:outline-none focus:border-primary"
-              />
-              <button
-                type="button"
-                onClick={handleSwitchRoom}
-                className="px-3.5 py-2 rounded-lg bg-surface-container-highest hover:bg-primary hover:text-on-primary text-on-surface text-[12.5px] font-semibold transition-colors shrink-0"
-              >
-                เปลี่ยนห้อง
               </button>
             </div>
           </div>

@@ -10,8 +10,143 @@ const __dirname = path.dirname(__filename);
 
 const DATA_DIR = path.resolve(__dirname, "data");
 const DEFAULT_ROOM_ID = "denewstock-main";
-const SAFE_ROOM_REGEX = /^[a-zA-Z0-9_-]{1,48}$/;
+const SAFE_ROOM_REGEX = /^[a-zA-Z0-9_-]{1,80}$/;
 const SAFE_ID_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
+const FIREBASE_CERTS_URL =
+  "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com";
+
+export interface VerifiedFirebaseUser {
+  uid: string;
+  email: string | null;
+}
+
+let cachedProjectId: string | null = null;
+let cachedFirebaseCerts: { certs: Record<string, string>; expiresAt: number } | null = null;
+
+async function getFirebaseProjectId(): Promise<string | null> {
+  if (cachedProjectId) return cachedProjectId;
+  try {
+    const raw = await fs.readFile(
+      path.resolve(__dirname, "firebase-applet-config.json"),
+      "utf-8"
+    );
+    const parsed = JSON.parse(raw) as { projectId?: unknown };
+    if (typeof parsed.projectId === "string" && parsed.projectId.trim()) {
+      cachedProjectId = parsed.projectId.trim();
+      return cachedProjectId;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function getFirebasePublicCerts(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (cachedFirebaseCerts && cachedFirebaseCerts.expiresAt > now) {
+    return cachedFirebaseCerts.certs;
+  }
+  const res = await fetch(FIREBASE_CERTS_URL, {
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Firebase public certs: ${res.status}`);
+  }
+  const certs = (await res.json()) as Record<string, string>;
+  const cacheControl = res.headers.get("cache-control") || "";
+  const maxAgeMatch = cacheControl.match(/max-age=(\d+)/i);
+  const ttlSec = maxAgeMatch ? Math.max(60, Math.min(86400, Number(maxAgeMatch[1]))) : 3600;
+  cachedFirebaseCerts = {
+    certs,
+    expiresAt: now + ttlSec * 1000,
+  };
+  return certs;
+}
+
+function decodeBase64UrlJson<T>(segment: string): T | null {
+  try {
+    const json = Buffer.from(segment, "base64url").toString("utf-8");
+    return JSON.parse(json) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function roomIdForUid(uid: string): string {
+  const safeUid = uid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+  return `acct-${safeUid}`;
+}
+
+export async function verifyFirebaseIdToken(
+  token: unknown
+): Promise<VerifiedFirebaseUser | null> {
+  if (typeof token !== "string") return null;
+  const trimmed = token.trim();
+  const parts = trimmed.split(".");
+  if (parts.length !== 3) return null;
+
+  const [headerB64, payloadB64, sigB64] = parts;
+  const header = decodeBase64UrlJson<{ alg?: string; kid?: string }>(headerB64);
+  const payload = decodeBase64UrlJson<{
+    aud?: string;
+    iss?: string;
+    sub?: string;
+    exp?: number;
+    iat?: number;
+    email?: string;
+    email_verified?: boolean;
+    firebase?: { sign_in_provider?: string };
+  }>(payloadB64);
+
+  if (!header || !payload) return null;
+  if (header.alg !== "RS256" || typeof header.kid !== "string" || !header.kid) {
+    return null;
+  }
+
+  const projectId = await getFirebaseProjectId();
+  if (!projectId) return null;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (payload.aud !== projectId) return null;
+  if (payload.iss !== `https://securetoken.google.com/${projectId}`) return null;
+  if (typeof payload.exp !== "number" || payload.exp <= nowSec - 30) return null;
+  if (typeof payload.iat !== "number" || payload.iat > nowSec + 300) return null;
+  if (typeof payload.sub !== "string" || !SAFE_ID_REGEX.test(payload.sub)) {
+    return null;
+  }
+  const signInProvider = payload.firebase?.sign_in_provider;
+  if (payload.email_verified !== true && signInProvider !== "password") {
+    return null;
+  }
+
+  try {
+    let certs = await getFirebasePublicCerts();
+    let certPem = certs[header.kid];
+    if (!certPem) {
+      // Refresh cert cache once in case Google rotated signing keys
+      cachedFirebaseCerts = null;
+      certs = await getFirebasePublicCerts();
+      certPem = certs[header.kid];
+    }
+    if (!certPem) return null;
+
+    const sigBuf = Buffer.from(sigB64, "base64url");
+    const verified = crypto.verify(
+      "RSA-SHA256",
+      Buffer.from(`${headerB64}.${payloadB64}`, "utf8"),
+      certPem,
+      sigBuf
+    );
+    if (!verified) return null;
+
+    return {
+      uid: payload.sub,
+      email: typeof payload.email === "string" ? payload.email : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export interface RoomDeviceInfo {
   deviceId: string;
@@ -46,7 +181,6 @@ interface RoomState {
   version: number;
   ownerName: string;
   ownerPin: string;
-  ownerLineId: string;
   promptPayId: string;
   promptPayName: string;
   categories: string[];
@@ -94,7 +228,6 @@ function createEmptyRoomState(): RoomState {
     version: 0,
     ownerName: "คุณธนวัฒน์",
     ownerPin: "4145",
-    ownerLineId: "Hnan145",
     promptPayId: "",
     promptPayName: "",
     categories: [],
@@ -112,7 +245,6 @@ function computeStateDigest(state: RoomState): string {
   const core = {
     ownerName: state.ownerName,
     ownerPin: state.ownerPin,
-    ownerLineId: state.ownerLineId,
     promptPayId: state.promptPayId,
     promptPayName: state.promptPayName,
     categories: state.categories,
@@ -166,7 +298,6 @@ function applyHydrateState(target: RoomState, incoming: Record<string, unknown>)
   if (typeof incoming.ownerPin === "string" && /^\d{4}$/.test(incoming.ownerPin)) {
     target.ownerPin = incoming.ownerPin;
   }
-  target.ownerLineId = sanitizeShortString(incoming.ownerLineId, 64, target.ownerLineId);
   if (typeof incoming.promptPayId === "string") {
     target.promptPayId = incoming.promptPayId.trim().slice(0, 20);
   }
@@ -193,7 +324,6 @@ function snapshotPublicState(state: RoomState) {
     version: state.version,
     ownerName: state.ownerName,
     ownerPin: state.ownerPin,
-    ownerLineId: state.ownerLineId,
     promptPayId: state.promptPayId,
     promptPayName: state.promptPayName,
     categories: state.categories,
@@ -879,10 +1009,6 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
           s.ownerPin = payload.ownerPin;
           updates.ownerPin = s.ownerPin;
         }
-        if (typeof payload.ownerLineId === "string" && payload.ownerLineId.trim()) {
-          s.ownerLineId = payload.ownerLineId.trim().slice(0, 64);
-          updates.ownerLineId = s.ownerLineId;
-        }
         if (typeof payload.promptPayId === "string") {
           s.promptPayId = payload.promptPayId.trim().slice(0, 20);
           updates.promptPayId = s.promptPayId;
@@ -902,46 +1028,48 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
   }
 
   const wss = new WebSocketServer({
-    server: httpServer,
-    path: "/ws/sync",
+    noServer: true,
     maxPayload: 4 * 1024 * 1024,
   });
 
-  wss.on("connection", async (ws, req) => {
-    const reqUrl = new URL(req.url || "/ws/sync", "http://localhost");
-    const roomId = sanitizeRoomId(reqUrl.searchParams.get("room"));
-    const ctx = await getOrCreateRoom(roomId);
-
-    const fallbackDeviceId = `dev-${crypto.randomBytes(6).toString("hex")}`;
-    const connectedAtLabel = new Date().toLocaleTimeString("th-TH", {
-      hour: "2-digit",
-      minute: "2-digit",
+  httpServer.on("upgrade", (req, socket, head) => {
+    try {
+      const url = new URL(req.url || "/", "http://localhost");
+      if (url.pathname !== "/ws/sync") {
+        return;
+      }
+    } catch {
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
     });
+  });
 
-    const client: LiveClient = {
-      ws,
-      isAlive: true,
-      roomId: ctx.roomId,
-      device: {
-        deviceId: fallbackDeviceId,
-        deviceName: "อุปกรณ์เชื่อมต่อใหม่",
-        deviceType: "desktop",
-        roleMode: "staff",
-        roomId: ctx.roomId,
-        connectedAt: connectedAtLabel,
-        lastActiveAt: Date.now(),
-        source: "live",
-      },
-    };
+  wss.on("connection", (ws) => {
+    let ctx: RoomContext | null = null;
+    let client: LiveClient | null = null;
+    let authInFlight = false;
 
-    ctx.clients.set(ws, client);
+    // Require cryptographic Firebase ID token verification within 6 seconds of connect
+    const authTimeout = setTimeout(() => {
+      if (!client) {
+        sendJson(ws, {
+          type: "auth:error",
+          message: "กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อเชื่อมต่อซิงก์ข้อมูล",
+        });
+        ws.close(4401, "Authentication required");
+      }
+    }, 6000);
 
     ws.on("pong", () => {
-      client.isAlive = true;
-      client.device.lastActiveAt = Date.now();
+      if (client) {
+        client.isAlive = true;
+        client.device.lastActiveAt = Date.now();
+      }
     });
 
-    ws.on("message", (raw) => {
+    ws.on("message", async (raw) => {
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(raw.toString()) as Record<string, unknown>;
@@ -949,11 +1077,13 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
         return;
       }
 
-      client.isAlive = true;
-      client.device.lastActiveAt = Date.now();
       const type = msg.type;
 
       if (type === "ping") {
+        if (client) {
+          client.isAlive = true;
+          client.device.lastActiveAt = Date.now();
+        }
         sendJson(ws, {
           type: "pong",
           clientSentAt: typeof msg.clientSentAt === "number" ? msg.clientSentAt : Date.now(),
@@ -961,6 +1091,97 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
         });
         return;
       }
+
+      if (type === "presence:hello") {
+        if (client || authInFlight) return;
+        authInFlight = true;
+        try {
+          const verified = await verifyFirebaseIdToken(msg.idToken);
+          if (!verified) {
+            clearTimeout(authTimeout);
+            sendJson(ws, {
+              type: "auth:error",
+              message: "ไม่สามารถยืนยันบัญชี Google ได้ กรุณาเข้าสู่ระบบใหม่",
+            });
+            ws.close(4401, "Unauthorized");
+            return;
+          }
+
+          if (ws.readyState !== WebSocket.OPEN) {
+            clearTimeout(authTimeout);
+            return;
+          }
+
+          clearTimeout(authTimeout);
+          // Lock WebSocket room strictly to this verified Google account UID
+          const accountRoomId = roomIdForUid(verified.uid);
+          const roomCtx = await getOrCreateRoom(accountRoomId);
+
+          const fallbackDeviceId = `dev-${crypto.randomBytes(6).toString("hex")}`;
+          const connectedAtLabel = new Date().toLocaleTimeString("th-TH", {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+
+          const newClient: LiveClient = {
+            ws,
+            isAlive: true,
+            roomId: roomCtx.roomId,
+            device: {
+              deviceId:
+                typeof msg.deviceId === "string" && SAFE_ID_REGEX.test(msg.deviceId)
+                  ? msg.deviceId
+                  : fallbackDeviceId,
+              deviceName: sanitizeShortString(
+                msg.deviceName,
+                80,
+                "อุปกรณ์เชื่อมต่อใหม่"
+              ),
+              deviceType:
+                msg.deviceType === "mobile" ||
+                msg.deviceType === "tablet" ||
+                msg.deviceType === "desktop"
+                  ? msg.deviceType
+                  : "desktop",
+              roleMode: msg.roleMode === "owner" ? "owner" : "staff",
+              roomId: roomCtx.roomId,
+              connectedAt: connectedAtLabel,
+              lastActiveAt: Date.now(),
+              source: "live",
+            },
+          };
+
+          ctx = roomCtx;
+          client = newClient;
+          roomCtx.clients.set(ws, newClient);
+
+          sendJson(ws, {
+            type: "room:init",
+            roomId: roomCtx.roomId,
+            initialized: roomCtx.state.initialized,
+            state: roomCtx.state.initialized ? snapshotPublicState(roomCtx.state) : null,
+            devices: getRoomDevices(roomCtx),
+            serverTime: Date.now(),
+          });
+          broadcastPresence(roomCtx);
+        } finally {
+          authInFlight = false;
+        }
+        return;
+      }
+
+      // Reject all data/sync messages until Firebase ID token is verified
+      if (!ctx || !client) {
+        sendJson(ws, {
+          type: "auth:error",
+          message: "ต้องเข้าสู่ระบบด้วยบัญชี Google ก่อนเข้าถึงข้อมูล",
+        });
+        ws.close(4401, "Unauthorized");
+        return;
+      }
+
+      client.isAlive = true;
+      client.device.lastActiveAt = Date.now();
 
       if (type === "room:resync") {
         sendJson(ws, {
@@ -971,36 +1192,6 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
           devices: getRoomDevices(ctx),
           serverTime: Date.now(),
         });
-        return;
-      }
-
-      if (type === "presence:hello") {
-        if (typeof msg.deviceId === "string" && SAFE_ID_REGEX.test(msg.deviceId)) {
-          client.device.deviceId = msg.deviceId;
-        }
-        client.device.deviceName = sanitizeShortString(
-          msg.deviceName,
-          80,
-          client.device.deviceName
-        );
-        if (
-          msg.deviceType === "mobile" ||
-          msg.deviceType === "tablet" ||
-          msg.deviceType === "desktop"
-        ) {
-          client.device.deviceType = msg.deviceType;
-        }
-        client.device.roleMode = msg.roleMode === "owner" ? "owner" : "staff";
-
-        sendJson(ws, {
-          type: "room:init",
-          roomId: ctx.roomId,
-          initialized: ctx.state.initialized,
-          state: ctx.state.initialized ? snapshotPublicState(ctx.state) : null,
-          devices: getRoomDevices(ctx),
-          serverTime: Date.now(),
-        });
-        broadcastPresence(ctx);
         return;
       }
 
@@ -1053,7 +1244,6 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
         const nextCandidate = createEmptyRoomState();
         nextCandidate.ownerName = ctx.state.ownerName;
         nextCandidate.ownerPin = ctx.state.ownerPin;
-        nextCandidate.ownerLineId = ctx.state.ownerLineId;
         nextCandidate.promptPayId = ctx.state.promptPayId;
         nextCandidate.promptPayName = ctx.state.promptPayName;
         nextCandidate.categories = [...ctx.state.categories];
@@ -1166,13 +1356,19 @@ export async function attachLiveSyncServer(httpServer: HttpServer) {
     });
 
     ws.on("close", () => {
-      ctx.clients.delete(ws);
-      broadcastPresence(ctx);
+      clearTimeout(authTimeout);
+      if (ctx) {
+        ctx.clients.delete(ws);
+        broadcastPresence(ctx);
+      }
     });
 
     ws.on("error", () => {
-      ctx.clients.delete(ws);
-      broadcastPresence(ctx);
+      clearTimeout(authTimeout);
+      if (ctx) {
+        ctx.clients.delete(ws);
+        broadcastPresence(ctx);
+      }
     });
   });
 

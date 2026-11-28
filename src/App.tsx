@@ -5,6 +5,7 @@ import { AiChatWidget } from "./components/AiChatWidget";
 import { BottomNav } from "./components/BottomNav";
 import { CustomersView } from "./components/CustomersView";
 import { DashboardView } from "./components/DashboardView";
+import { GoogleLoginScreen } from "./components/GoogleLoginScreen";
 import { Header } from "./components/Header";
 import { InventoryView } from "./components/InventoryView";
 import {
@@ -12,7 +13,6 @@ import {
   CreateOrderModal,
   DeliveryConfirmModal,
   EditProductModal,
-  LowStockLineAlertModal,
   PrintLabelModal,
 } from "./components/Modals";
 import { MultiDeviceModal } from "./components/MultiDeviceModal";
@@ -26,16 +26,22 @@ import {
 } from "./components/PWAInstallPrompt";
 import { usePWAInstall } from "./hooks/usePWAInstall";
 import {
-  INITIAL_ACCOUNTING_ENTRIES,
-  INITIAL_APPROVALS,
   INITIAL_CATEGORIES,
-  INITIAL_CUSTOMERS,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_ORDERS,
-  INITIAL_PRODUCTS,
   LEGACY_DEFAULT_CATEGORIES,
 } from "./data/initialData";
-import { auth, signInWithGoogle, signOutUser } from "./firebase";
+import {
+  auth,
+  changeAccountPassword,
+  formatAccountIdentifier,
+  formatGoogleAuthError,
+  formatPasswordAuthError,
+  isPasswordAuthUser,
+  linkPasswordToCurrentAccount,
+  registerWithUsernamePassword,
+  signInWithGoogle,
+  signInWithUsernamePassword,
+  signOutUser,
+} from "./firebase";
 import {
   confirmOrderDeliveryDoc,
   confirmOrderShipDoc,
@@ -54,7 +60,6 @@ import {
   deleteOrderDoc,
   deleteProductDoc,
   ensureUserWorkspace,
-  LocalSeedSnapshot,
   markNotificationReadDoc,
   markOrderReadyToShipDoc,
   packOrderDoc,
@@ -96,33 +101,27 @@ import {
   TabId,
 } from "./types";
 import {
-  AutoLineEventType,
-  buildLowStockLineMessage,
-  buildNewOrderLineMessage,
-  buildStockApprovedLineMessage,
-  sendAutomaticLineNotification,
-} from "./utils/lineAlert";
-import {
   detectDeviceFormFactor,
   getOrCreateDeviceId,
   getSavedDeviceName,
   LiveConnectionStatus,
   LiveSyncClient,
-  persistRoomId,
   RemoteLiveAction,
-  resolveInitialRoomId,
   saveDeviceName,
 } from "./utils/liveSync";
 
 const DEFAULT_OWNER_NAME = "คุณธนวัฒน์";
 const DEFAULT_OWNER_PIN = "4145";
-const DEFAULT_OWNER_LINE_ID = "Hnan145";
-const STORAGE_KEY = "denewstock_store_v1";
+const LEGACY_STORAGE_KEY = "denewstock_store_v1";
+const ACCOUNT_STORAGE_PREFIX = "denewstock_store_v2_";
+
+function getAccountStorageKey(uid: string): string {
+  return `${ACCOUNT_STORAGE_PREFIX}${uid}`;
+}
 
 interface PersistedStore {
   ownerName: string;
   ownerPin: string;
-  ownerLineId: string;
   promptPayId: string;
   promptPayName: string;
   categories: string[];
@@ -149,25 +148,26 @@ function getTodayIso(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function loadInitialStore(): PersistedStore {
-  const defaults: PersistedStore = {
+function createEmptyStore(): PersistedStore {
+  return {
     ownerName: DEFAULT_OWNER_NAME,
     ownerPin: DEFAULT_OWNER_PIN,
-    ownerLineId: DEFAULT_OWNER_LINE_ID,
     promptPayId: "",
     promptPayName: "",
     categories: INITIAL_CATEGORIES,
-    products: INITIAL_PRODUCTS,
-    orders: INITIAL_ORDERS,
-    customers: INITIAL_CUSTOMERS,
-    approvals: INITIAL_APPROVALS,
-    notifications: INITIAL_NOTIFICATIONS,
-    accountingEntries: INITIAL_ACCOUNTING_ENTRIES,
+    products: [],
+    orders: [],
+    customers: [],
+    approvals: [],
+    notifications: [],
+    accountingEntries: [],
   };
+}
 
+function loadAccountStore(uid: string): PersistedStore | null {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaults;
+    const raw = window.localStorage.getItem(getAccountStorageKey(uid));
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<PersistedStore>;
 
     const categories = isLegacyOnlyCategories(parsed.categories)
@@ -179,18 +179,12 @@ function loadInitialStore(): PersistedStore {
         ? parsed.ownerPin
         : DEFAULT_OWNER_PIN;
 
-    const ownerLineId =
-      typeof parsed.ownerLineId === "string" && parsed.ownerLineId.trim()
-        ? parsed.ownerLineId.trim()
-        : DEFAULT_OWNER_LINE_ID;
-
     return {
       ownerName:
         typeof parsed.ownerName === "string" && parsed.ownerName.trim()
           ? parsed.ownerName.trim()
           : DEFAULT_OWNER_NAME,
       ownerPin,
-      ownerLineId,
       promptPayId:
         typeof parsed.promptPayId === "string"
           ? parsed.promptPayId.trim().slice(0, 20)
@@ -200,25 +194,19 @@ function loadInitialStore(): PersistedStore {
           ? parsed.promptPayName.trim().slice(0, 80)
           : "",
       categories,
-      products: Array.isArray(parsed.products)
-        ? parsed.products
-        : INITIAL_PRODUCTS,
-      orders: Array.isArray(parsed.orders) ? parsed.orders : INITIAL_ORDERS,
-      customers: Array.isArray(parsed.customers)
-        ? parsed.customers
-        : INITIAL_CUSTOMERS,
-      approvals: Array.isArray(parsed.approvals)
-        ? parsed.approvals
-        : INITIAL_APPROVALS,
+      products: Array.isArray(parsed.products) ? parsed.products : [],
+      orders: Array.isArray(parsed.orders) ? parsed.orders : [],
+      customers: Array.isArray(parsed.customers) ? parsed.customers : [],
+      approvals: Array.isArray(parsed.approvals) ? parsed.approvals : [],
       notifications: Array.isArray(parsed.notifications)
         ? parsed.notifications
-        : INITIAL_NOTIFICATIONS,
+        : [],
       accountingEntries: Array.isArray(parsed.accountingEntries)
         ? parsed.accountingEntries
-        : INITIAL_ACCOUNTING_ENTRIES,
+        : [],
     };
   } catch {
-    return defaults;
+    return null;
   }
 }
 
@@ -227,17 +215,14 @@ function makeId(prefix: string): string {
 }
 
 export default function App() {
-  const [initialStore] = useState<PersistedStore>(() => loadInitialStore());
-
-  // Device identity & live multi-device room
+  // Device identity & authenticated live multi-device sync
   const [deviceId] = useState<string>(() => getOrCreateDeviceId());
   const [deviceType] = useState(() => detectDeviceFormFactor());
   const [deviceName, setDeviceName] = useState<string>(() =>
     getSavedDeviceName(detectDeviceFormFactor())
   );
-  const [roomId, setRoomId] = useState<string>(() => resolveInitialRoomId());
   const [liveStatus, setLiveStatus] =
-    useState<LiveConnectionStatus>("connecting");
+    useState<LiveConnectionStatus>("offline");
   const [liveDevices, setLiveDevices] = useState<ConnectedDevice[]>([]);
   const [cloudDevices, setCloudDevices] = useState<ConnectedDevice[]>([]);
   const [liveEvents, setLiveEvents] = useState<LiveActivityEvent[]>([]);
@@ -250,45 +235,35 @@ export default function App() {
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState<
     "all" | "low" | undefined
   >(undefined);
-  // Open directly in Staff mode without any blocking login screen; Owner mode unlocks via 4-digit PIN
+  // Staff mode by default after Google Sign-In; Owner mode unlocks via 4-digit PIN
   const [role, setRole] = useState<RoleMode>("staff");
-  const [ownerName, setOwnerName] = useState<string>(initialStore.ownerName);
-  const [ownerPin, setOwnerPin] = useState<string>(initialStore.ownerPin);
-  const [ownerLineId, setOwnerLineId] = useState<string>(
-    initialStore.ownerLineId
-  );
-  const [promptPayId, setPromptPayId] = useState<string>(
-    initialStore.promptPayId
-  );
-  const [promptPayName, setPromptPayName] = useState<string>(
-    initialStore.promptPayName
-  );
-  const [products, setProducts] = useState<ProductItem[]>(
-    initialStore.products
-  );
-  const [categories, setCategories] = useState<string[]>(
-    initialStore.categories
-  );
-  const [orders, setOrders] = useState<Order[]>(initialStore.orders);
-  const [customers, setCustomers] = useState<Customer[]>(
-    initialStore.customers
-  );
-  const [approvals, setApprovals] = useState<StockApprovalRequest[]>(
-    initialStore.approvals
-  );
-  const [notifications, setNotifications] = useState<AppNotification[]>(
-    initialStore.notifications
-  );
+  const [ownerName, setOwnerName] = useState<string>(DEFAULT_OWNER_NAME);
+  const [ownerPin, setOwnerPin] = useState<string>(DEFAULT_OWNER_PIN);
+  const [promptPayId, setPromptPayId] = useState<string>("");
+  const [promptPayName, setPromptPayName] = useState<string>("");
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [categories, setCategories] = useState<string[]>(INITIAL_CATEGORIES);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [approvals, setApprovals] = useState<StockApprovalRequest[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [accountingEntries, setAccountingEntries] = useState<AccountingEntry[]>(
-    initialStore.accountingEntries
+    []
   );
 
   // Online Cloud Sync state (Firebase Auth + real-time Firestore)
+  const [authReady, setAuthReady] = useState(false);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [cloudStatus, setCloudStatus] = useState<
     "connected" | "connecting" | "local"
   >("local");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authProviderDisabled, setAuthProviderDisabled] = useState(false);
+  const [hasPasswordLogin, setHasPasswordLogin] = useState(false);
   const [isSyncingCloudAll, setIsSyncingCloudAll] = useState(false);
+
+  const accountRoomId = cloudUser ? `acct-${cloudUser.uid}` : "";
+  const accountIdentifier = formatAccountIdentifier(cloudUser);
 
   const [activeOrderTab, setActiveOrderTab] = useState<OrdersTab>("pending");
   const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
@@ -306,10 +281,6 @@ export default function App() {
   const [paymentQrOrder, setPaymentQrOrder] = useState<Order | null>(null);
   const [confirmingDeliveryOrder, setConfirmingDeliveryOrder] =
     useState<Order | null>(null);
-  const [lowStockLineAlert, setLowStockLineAlert] = useState<{
-    products: ProductItem[];
-    triggerContext?: string;
-  } | null>(null);
   const [aiChatOpen, setAiChatOpen] = useState(false);
   const pwa = usePWAInstall();
   const [showInstallGuide, setShowInstallGuide] = useState(false);
@@ -331,13 +302,12 @@ export default function App() {
   const deviceNameRef = useRef<string>(deviceName);
   deviceNameRef.current = deviceName;
 
-  const roomIdRef = useRef<string>(roomId);
-  roomIdRef.current = roomId;
+  const accountRoomIdRef = useRef<string>(accountRoomId);
+  accountRoomIdRef.current = accountRoomId;
 
   const localSnapshotRef = useRef<PersistedStore>({
     ownerName,
     ownerPin,
-    ownerLineId,
     promptPayId,
     promptPayName,
     categories,
@@ -351,7 +321,6 @@ export default function App() {
   localSnapshotRef.current = {
     ownerName,
     ownerPin,
-    ownerLineId,
     promptPayId,
     promptPayName,
     categories,
@@ -363,8 +332,38 @@ export default function App() {
     accountingEntries,
   };
 
-  // Merge WebSocket room devices + Firestore cloud devices (deduplicated by deviceId)
+  const applyStoreState = (store: PersistedStore) => {
+    setOwnerName(store.ownerName);
+    setOwnerPin(store.ownerPin);
+    setPromptPayId(store.promptPayId);
+    setPromptPayName(store.promptPayName);
+    setCategories(
+      store.categories.length > 0 ? store.categories : INITIAL_CATEGORIES
+    );
+    setProducts(store.products);
+    setOrders(store.orders);
+    setCustomers(store.customers);
+    setApprovals(store.approvals);
+    setNotifications(store.notifications);
+    setAccountingEntries(store.accountingEntries);
+  };
+
+  const resetStoreToEmpty = () => {
+    applyStoreState(createEmptyStore());
+    setRole("staff");
+    setActiveTab("dashboard");
+    setShowMultiDeviceModal(false);
+    setEditingProduct(null);
+    setPrintingOrder(null);
+    setPaymentQrOrder(null);
+    setConfirmingDeliveryOrder(null);
+    setShowAddProductModal(false);
+    setShowCreateOrderModal(false);
+  };
+
+  // Merge WebSocket account room devices + Firestore cloud devices (deduplicated by deviceId)
   const mergedDevices = useMemo<ConnectedDevice[]>(() => {
+    if (!cloudUser) return [];
     const byId = new Map<string, ConnectedDevice>();
     for (const dev of cloudDevices) {
       byId.set(dev.deviceId, dev);
@@ -378,7 +377,7 @@ export default function App() {
         deviceName,
         deviceType,
         roleMode: role,
-        roomId,
+        roomId: accountRoomId,
         lastActiveAt: Date.now(),
         source: "live",
       });
@@ -388,7 +387,16 @@ export default function App() {
       if (b.deviceId === deviceId) return 1;
       return b.lastActiveAt - a.lastActiveAt;
     });
-  }, [cloudDevices, liveDevices, deviceId, deviceName, deviceType, role, roomId]);
+  }, [
+    cloudUser,
+    cloudDevices,
+    liveDevices,
+    deviceId,
+    deviceName,
+    deviceType,
+    role,
+    accountRoomId,
+  ]);
 
   const stampSynced = () => {
     const now = new Date();
@@ -715,13 +723,11 @@ export default function App() {
         const updates: Partial<{
           ownerName: string;
           ownerPin: string;
-          ownerLineId: string;
           promptPayId: string;
           promptPayName: string;
         }> = {};
         if (typeof p.ownerName === "string") updates.ownerName = p.ownerName;
         if (typeof p.ownerPin === "string") updates.ownerPin = p.ownerPin;
-        if (typeof p.ownerLineId === "string") updates.ownerLineId = p.ownerLineId;
         if (typeof p.promptPayId === "string") updates.promptPayId = p.promptPayId;
         if (typeof p.promptPayName === "string") updates.promptPayName = p.promptPayName;
         if (Object.keys(updates).length > 0) {
@@ -1125,9 +1131,6 @@ export default function App() {
         if (typeof p.ownerPin === "string" && /^\d{4}$/.test(p.ownerPin)) {
           setOwnerPin(p.ownerPin);
         }
-        if (typeof p.ownerLineId === "string" && p.ownerLineId.trim()) {
-          setOwnerLineId(p.ownerLineId.trim());
-        }
         if (typeof p.promptPayId === "string") {
           setPromptPayId(p.promptPayId.trim().slice(0, 20));
         }
@@ -1145,14 +1148,27 @@ export default function App() {
     mirrorRemoteActionToCloud(event);
   };
 
-  // Real-Time Multi-Device WebSocket Sync (works immediately across unlimited devices without login!)
+  // Real-Time Multi-Device WebSocket Sync — locked strictly to the signed-in Google account
   useEffect(() => {
+    if (!cloudUser) {
+      setLiveStatus("offline");
+      setLiveDevices([]);
+      setLiveEvents([]);
+      setLiveLatencyMs(null);
+      return;
+    }
+
+    const signedInUser = cloudUser;
+    const targetRoomId = `acct-${signedInUser.uid}`;
+
     const client = new LiveSyncClient({
-      roomId,
+      roomId: targetRoomId,
       deviceId,
       deviceName: deviceNameRef.current,
       deviceType,
       roleMode: roleRef.current,
+      getIdToken: (forceRefresh) =>
+        signedInUser.getIdToken(Boolean(forceRefresh)),
       getHydrateSnapshot: () => localSnapshotRef.current,
       onStatusChange: (status) => {
         setLiveStatus(status);
@@ -1162,7 +1178,6 @@ export default function App() {
         if (snapshot.ownerPin && /^\d{4}$/.test(snapshot.ownerPin)) {
           setOwnerPin(snapshot.ownerPin);
         }
-        if (snapshot.ownerLineId) setOwnerLineId(snapshot.ownerLineId);
         if (typeof snapshot.promptPayId === "string") {
           setPromptPayId(snapshot.promptPayId.trim().slice(0, 20));
         }
@@ -1210,9 +1225,9 @@ export default function App() {
         liveClientRef.current = null;
       }
     };
-    // Reconnect only when roomId changes
+    // Reconnect only when authenticated Google account UID changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, deviceId, deviceType]);
+  }, [cloudUser?.uid, deviceId, deviceType]);
 
   // Fetch real-time live CNY/THB exchange rate on startup & every 5 minutes while visible
   useEffect(() => {
@@ -1226,7 +1241,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep presence metadata in sync when role, deviceName, roomId, or cloudStatus changes
+  // Keep presence metadata in sync when role, deviceName, or cloudStatus changes
   useEffect(() => {
     liveClientRef.current?.updatePresence({
       deviceName,
@@ -1238,19 +1253,19 @@ export default function App() {
           deviceName,
           deviceType,
           roleMode: role,
-          roomId,
+          roomId: accountRoomId,
         })
       );
     }
-  }, [role, deviceName, roomId, cloudUser, cloudStatus, deviceId, deviceType]);
+  }, [role, deviceName, accountRoomId, cloudUser, cloudStatus, deviceId, deviceType]);
 
-  // Auto-persist store state to localStorage (offline cache + instant reload)
+  // Auto-persist store state strictly to the signed-in Google account's local cache
   useEffect(() => {
+    if (!cloudUser) return;
     try {
       const payload: PersistedStore = {
         ownerName,
         ownerPin,
-        ownerLineId,
         promptPayId,
         promptPayName,
         categories,
@@ -1261,15 +1276,18 @@ export default function App() {
         notifications,
         accountingEntries,
       };
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      window.localStorage.setItem(
+        getAccountStorageKey(cloudUser.uid),
+        JSON.stringify(payload)
+      );
       stampSynced();
     } catch {
       // Ignore storage quota errors gracefully
     }
   }, [
+    cloudUser,
     ownerName,
     ownerPin,
-    ownerLineId,
     promptPayId,
     promptPayName,
     categories,
@@ -1317,17 +1335,31 @@ export default function App() {
 
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       cleanupSubs();
+      setAuthReady(true);
 
       if (!user) {
         setCloudUser(null);
+        setHasPasswordLogin(false);
         setCloudStatus("local");
         setCloudDevices([]);
+        setLiveDevices([]);
+        setLiveEvents([]);
+        resetStoreToEmpty();
+        try {
+          window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
         return;
       }
 
-      if (user.emailVerified === false) {
+      if (user.emailVerified === false && !isPasswordAuthUser(user)) {
         setCloudUser(null);
+        setHasPasswordLogin(false);
         setCloudStatus("local");
+        setCloudDevices([]);
+        resetStoreToEmpty();
+        setAuthError("กรุณาใช้อีเมลที่ยืนยันแล้วเพื่อเชื่อมต่อฐานข้อมูล Firebase");
         showToast(
           "กรุณาใช้อีเมลที่ยืนยันแล้วเพื่อเชื่อมต่อฐานข้อมูลออนไลน์",
           "error"
@@ -1335,22 +1367,31 @@ export default function App() {
         return;
       }
 
+      try {
+        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+
+      const cachedForAccount = loadAccountStore(user.uid);
+      applyStoreState(cachedForAccount || createEmptyStore());
+      setAuthError(null);
+      setAuthProviderDisabled(false);
       setCloudUser(user);
+      setHasPasswordLogin(isPasswordAuthUser(user));
       setCloudStatus("connecting");
 
       try {
-        const snapshot: LocalSeedSnapshot = localSnapshotRef.current;
         await ensureUserWorkspace(
           user.uid,
-          snapshot.ownerName || user.displayName || DEFAULT_OWNER_NAME,
-          snapshot
+          cachedForAccount?.ownerName || user.displayName || DEFAULT_OWNER_NAME
         );
       } catch (err) {
         console.error("Failed to initialize cloud workspace:", err);
         if (!cancelled) {
           setCloudStatus("local");
           showToast(
-            "เชื่อมต่อคลาวด์ไม่สำเร็จ ระบบยังซิงก์สดหลายเครื่องให้ตามปกติ",
+            "เชื่อมต่อคลาวด์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
             "cloud_off"
           );
         }
@@ -1371,7 +1412,7 @@ export default function App() {
             deviceName: deviceNameRef.current,
             deviceType,
             roleMode: roleRef.current,
-            roomId: roomIdRef.current,
+            roomId: accountRoomIdRef.current,
           })
         );
       }, 90_000);
@@ -1383,9 +1424,6 @@ export default function App() {
             if (ws.ownerName) setOwnerName(ws.ownerName);
             if (ws.ownerPin && /^\d{4}$/.test(ws.ownerPin)) {
               setOwnerPin(ws.ownerPin);
-            }
-            if (ws.ownerLineId && ws.ownerLineId.trim()) {
-              setOwnerLineId(ws.ownerLineId.trim());
             }
             if (typeof ws.promptPayId === "string") {
               setPromptPayId(ws.promptPayId.trim().slice(0, 20));
@@ -1481,27 +1519,121 @@ export default function App() {
     };
   }, [deviceId, deviceType]);
 
+  const handleSignInWithPassword = async (
+    username: string,
+    password: string
+  ) => {
+    try {
+      setAuthError(null);
+      setAuthProviderDisabled(false);
+      setCloudStatus("connecting");
+      const cred = await signInWithUsernamePassword(username, password);
+      const label = formatAccountIdentifier(cred.user) || username;
+      showToast(`เข้าสู่ระบบสำเร็จ (${label})`, "cloud_done");
+    } catch (err) {
+      setCloudStatus(cloudUser ? "connected" : "local");
+      const parsed = formatPasswordAuthError(err);
+      setAuthProviderDisabled(Boolean(parsed.isProviderDisabled));
+      setAuthError(parsed.message);
+      showToast(parsed.message, "error");
+    }
+  };
+
+  const handleRegisterWithPassword = async (
+    username: string,
+    password: string,
+    storeDisplayName?: string
+  ) => {
+    try {
+      setAuthError(null);
+      setAuthProviderDisabled(false);
+      setCloudStatus("connecting");
+      const cred = await registerWithUsernamePassword(
+        username,
+        password,
+        storeDisplayName
+      );
+      const label = formatAccountIdentifier(cred.user) || username;
+      setHasPasswordLogin(true);
+      showToast(`สร้างบัญชีร้าน "${label}" และเข้าสู่ระบบแล้ว`, "cloud_done");
+    } catch (err) {
+      setCloudStatus(cloudUser ? "connected" : "local");
+      const parsed = formatPasswordAuthError(err);
+      setAuthProviderDisabled(Boolean(parsed.isProviderDisabled));
+      setAuthError(parsed.message);
+      showToast(parsed.message, "error");
+    }
+  };
+
+  const handleSetupLoginPassword = async (newPassword: string) => {
+    if (role !== "owner") {
+      return {
+        ok: false,
+        error: "เฉพาะเจ้าของร้านเท่านั้นที่สามารถตั้งค่าการเข้าสู่ระบบได้",
+      };
+    }
+    try {
+      await linkPasswordToCurrentAccount(newPassword);
+      setHasPasswordLogin(true);
+      showToast(
+        "ตั้งรหัสผ่านเข้าสู่ระบบสำเร็จ — เครื่องอื่นสามารถล็อกอินด้วยชื่อผู้ใช้และรหัสผ่านนี้ได้ทันที",
+        "verified_user"
+      );
+      return { ok: true };
+    } catch (err) {
+      const parsed = formatPasswordAuthError(err);
+      showToast(parsed.message, "error");
+      return {
+        ok: false,
+        error: parsed.message,
+        providerDisabled: parsed.isProviderDisabled,
+      };
+    }
+  };
+
+  const handleChangeLoginPassword = async (
+    currentPassword: string,
+    newPassword: string
+  ) => {
+    if (role !== "owner") {
+      return {
+        ok: false,
+        error: "เฉพาะเจ้าของร้านเท่านั้นที่สามารถเปลี่ยนรหัสผ่านเข้าสู่ระบบได้",
+      };
+    }
+    try {
+      await changeAccountPassword(currentPassword, newPassword);
+      showToast("เปลี่ยนรหัสผ่านเข้าสู่ระบบเรียบร้อยแล้ว", "key");
+      return { ok: true };
+    } catch (err) {
+      const parsed = formatPasswordAuthError(err);
+      showToast(parsed.message, "error");
+      return {
+        ok: false,
+        error: parsed.message,
+        providerDisabled: parsed.isProviderDisabled,
+      };
+    }
+  };
+
   const handleConnectCloud = async () => {
     try {
+      setAuthError(null);
+      setAuthProviderDisabled(false);
       setCloudStatus("connecting");
       const cred = await signInWithGoogle();
       showToast(
-        `สำรองคลาวด์ออนไลน์แล้ว (${cred.user.email || "Google"})`,
+        `เข้าสู่ระบบ Google สำเร็จ (${cred.user.email || "Google"})`,
         "cloud_done"
       );
     } catch (err) {
       setCloudStatus(cloudUser ? "connected" : "local");
-      const code = (err as { code?: string })?.code || "";
-      if (
-        code === "auth/popup-closed-by-user" ||
-        code === "auth/cancelled-popup-request"
-      ) {
+      const friendly = formatGoogleAuthError(err);
+      if (!friendly) {
         return;
       }
-      showToast(
-        "ไม่สามารถเชื่อมต่อบัญชี Google ได้ กรุณาลองใหม่อีกครั้ง",
-        "cloud_off"
-      );
+      setAuthError(friendly);
+      showToast(friendly, "cloud_off");
     }
   };
 
@@ -1511,9 +1643,10 @@ export default function App() {
         await deleteDeviceSessionDoc(cloudUser.uid, deviceId).catch(() => {});
       }
       await signOutUser();
-      showToast("ตัดการเชื่อมต่อคลาวด์ Google แล้ว", "cloud_off");
+      resetStoreToEmpty();
+      showToast("ออกจากระบบแล้ว", "logout");
     } catch {
-      showToast("ไม่สามารถตัดการเชื่อมต่อคลาวด์ได้", "error");
+      showToast("ไม่สามารถออกจากระบบได้", "error");
     }
   };
 
@@ -1528,9 +1661,12 @@ export default function App() {
         targetUser = cred.user;
       }
 
-      if (!targetUser || targetUser.emailVerified === false) {
+      if (
+        !targetUser ||
+        (targetUser.emailVerified === false && !isPasswordAuthUser(targetUser))
+      ) {
         showToast(
-          "กรุณาเข้าสู่ระบบด้วยบัญชี Google ที่ยืนยันอีเมลแล้ว",
+          "กรุณาเข้าสู่ระบบด้วยบัญชีร้านหรือบัญชี Google ที่ยืนยันแล้ว",
           "error"
         );
         return;
@@ -1568,12 +1704,6 @@ export default function App() {
     const clean = saveDeviceName(nextName);
     setDeviceName(clean);
     showToast(`เปลี่ยนชื่อเครื่องเป็น "${clean}" แล้ว`, "devices");
-  };
-
-  const handleChangeRoom = (nextRoomId: string) => {
-    const clean = persistRoomId(nextRoomId);
-    setRoomId(clean);
-    showToast(`เชื่อมต่อห้องซิงก์ "${clean}" แล้ว`, "hub");
   };
 
   // Accounting and weekly sales chart are restricted to Owner mode only
@@ -1644,9 +1774,9 @@ export default function App() {
     `โหมดผู้ใช้งาน: ${role === "owner" ? `เจ้าของร้าน (${ownerName})` : "พนักงานหน้าร้าน"}`,
     `สถานะใช้งานพร้อมกันหลายเครื่อง: ${
       liveStatus === "connected"
-        ? `ออนไลน์สด ${mergedDevices.length} เครื่อง (ห้อง ${roomId})`
+        ? `ออนไลน์สด ${mergedDevices.length} เครื่อง (บัญชี ${accountIdentifier || "บัญชีร้าน"})`
         : "กำลังเชื่อมต่อ"
-    }${cloudStatus === "connected" ? ` · สำรองคลาวด์ Google (${cloudUser?.email || "Cloud"})` : ""}`,
+    }${cloudStatus === "connected" ? ` · สำรองคลาวด์ Firebase (${accountIdentifier || "Cloud"})` : ""}`,
     `ภาพรวมคลังสินค้า: ${products.length} รายการ (SKU), รวม ${totalStockUnits} ชิ้น, สินค้าต่ำกว่าเกณฑ์ต้องสั่งเติม ${lowStockProducts.length} รายการ`,
     ...(role === "owner"
       ? [
@@ -1776,59 +1906,15 @@ export default function App() {
     showToast(`เพิ่มหมวดหมู่ "${categoryName}" แล้ว`, "category");
   };
 
-  const dispatchAutoLineAlert = async (
-    eventType: AutoLineEventType,
-    message: string,
-    metadata?: Record<string, string | number | boolean>,
-    showFeedbackOnUnconfigured = false
-  ) => {
-    const result = await sendAutomaticLineNotification({
-      eventType,
-      targetLineId: ownerLineId,
-      message,
-      metadata,
-    });
-    if (result.delivered) {
-      showToast(
-        `ส่งแจ้งเตือนอัตโนมัติไปยัง LINE (${ownerLineId}) แล้ว`,
-        "notifications_active"
-      );
-    } else if (showFeedbackOnUnconfigured) {
-      if (!result.configured) {
-        showToast(
-          "ยังไม่ได้ตั้งค่า LINE API/Webhook ใน Secrets — พร้อมส่งผ่านปุ่ม LINE ในแอป",
-          "info"
-        );
-      } else {
-        showToast(
-          result.error || "ไม่สามารถส่งแจ้งเตือนไปยัง LINE API ได้",
-          "error"
-        );
-      }
-    }
-  };
-
-  const openLowStockLineAlert = (
-    items: ProductItem[],
-    triggerContext?: string,
-    recordNotification = false
-  ) => {
+  const recordLowStockAlert = (items: ProductItem[]) => {
     if (items.length === 0) return;
-    if (recordNotification) {
-      pushNotification(
-        `แจ้งเตือนสินค้าใกล้หมด (LINE: ${ownerLineId})`,
-        items
-          .map((p) => `${p.name} เหลือ ${p.stock}/${p.lowThreshold} ชิ้น`)
-          .join(", "),
-        "stock"
-      );
-      void dispatchAutoLineAlert(
-        "low_stock",
-        buildLowStockLineMessage(items, ownerLineId, triggerContext),
-        { count: items.length, triggerContext: triggerContext || "" }
-      );
-    }
-    setLowStockLineAlert({ products: items, triggerContext });
+    pushNotification(
+      "แจ้งเตือนสินค้าใกล้หมด",
+      items
+        .map((p) => `${p.name} เหลือ ${p.stock}/${p.lowThreshold} ชิ้น`)
+        .join(", "),
+      "stock"
+    );
   };
 
   const handleUpdateProductOwner = (updated: ProductItem) => {
@@ -1887,7 +1973,7 @@ export default function App() {
       updatedItem.stock < updatedItem.lowThreshold &&
       (!previous || updatedItem.stock < previous.stock)
     ) {
-      openLowStockLineAlert([updatedItem], "หลังแก้ไขสต็อกสินค้า", true);
+      recordLowStockAlert([updatedItem]);
     }
   };
 
@@ -1961,11 +2047,10 @@ export default function App() {
         minute: "2-digit",
       }),
       status: "pending",
-      notifiedLineId: ownerLineId,
     };
     setApprovals((prev) => [req, ...prev]);
     const noti = pushNotification(
-      `คำขออนุญาตแก้ไขสต็อก (แจ้ง LINE: ${ownerLineId})`,
+      "คำขออนุญาตแก้ไขสต็อก",
       `${product.name} (${product.sku}): ขอปรับ ${product.stock} → ${requestedStock} ชิ้น`,
       "approval",
       false
@@ -1977,27 +2062,7 @@ export default function App() {
         "บันทึกคำขออนุมัติลงคลาวด์ไม่สำเร็จ"
       );
     }
-    showToast(
-      `ส่งคำขออนุญาตไปที่เจ้าของร้าน (LINE: ${ownerLineId}) แล้ว`,
-      "send"
-    );
-    void dispatchAutoLineAlert(
-      "stock_request",
-      [
-        "📦 [DenewStock] ขออนุญาตแก้ไขจำนวนสต็อก",
-        `รหัสคำขอ: #${req.id}`,
-        `สินค้า: ${req.productName} (${req.sku})`,
-        `สต็อกเดิม: ${req.currentStock} → ขอปรับเป็น: ${req.requestedStock} ชิ้น`,
-        `เหตุผล: ${req.reason}`,
-        `แจ้งเตือนถึง LINE ID: ${ownerLineId}`,
-      ].join("\n"),
-      {
-        requestId: req.id,
-        sku: req.sku,
-        currentStock: req.currentStock,
-        requestedStock: req.requestedStock,
-      }
-    );
+    showToast("ส่งคำขออนุญาตไปที่เจ้าของร้านแล้ว", "send");
     return req;
   };
 
@@ -2048,30 +2113,13 @@ export default function App() {
         "check_circle"
       );
 
-      // Automatically push approval alert via LINE API / Webhook to Hnan145
-      void dispatchAutoLineAlert(
-        "stock_approved",
-        buildStockApprovedLineMessage(target, ownerLineId, ownerName),
-        {
-          requestId: target.id,
-          sku: target.sku,
-          currentStock: target.currentStock,
-          requestedStock: target.requestedStock,
-          approvedBy: ownerName,
-        }
-      );
-
       if (
         updatedProduct &&
         targetProduct &&
         updatedProduct.stock < updatedProduct.lowThreshold &&
         updatedProduct.stock < targetProduct.stock
       ) {
-        openLowStockLineAlert(
-          [updatedProduct],
-          `หลังอนุมัติปรับสต็อก #${reqId}`,
-          true
-        );
+        recordLowStockAlert([updatedProduct]);
       }
     } else {
       showToast(`ปฏิเสธคำขอปรับสต็อก ${target.sku} แล้ว`, "cancel");
@@ -2190,11 +2238,7 @@ export default function App() {
     showToast(`แพ็ค #${orderId} สำเร็จ — ตัดสต็อกอัตโนมัติแล้ว`, "check_circle");
 
     if (newlyLowProducts.length > 0) {
-      openLowStockLineAlert(
-        newlyLowProducts,
-        `หลังตัดสต็อกออเดอร์ #${orderId}`,
-        true
-      );
+      recordLowStockAlert(newlyLowProducts);
     }
   };
 
@@ -2254,12 +2298,19 @@ export default function App() {
       );
     }
 
+    const shippingLabel =
+      options.shippingOption === "store_delivery"
+        ? "ร้านจัดส่งเอง"
+        : options.shippingOption === "store_pickup"
+          ? "ลูกค้ารับเองหน้าร้าน"
+          : options.carrierName || options.courier || "ขนส่งพัสดุ";
+
     const toastSummary =
       options.shippingOption === "store_delivery"
         ? `ยืนยันส่งถึงหน้าร้าน #${orderId} แล้ว`
         : options.shippingOption === "store_pickup"
           ? `ยืนยันลูกค้ามารับหน้าร้าน #${orderId} แล้ว`
-          : `จัดส่ง #${orderId} แล้ว (${options.carrierName || options.courier || "ขนส่ง"}: ${tracking})`;
+          : `จัดส่ง #${orderId} แล้ว (${shippingLabel}: ${tracking})`;
 
     showToast(toastSummary, "local_shipping");
     setConfirmingDeliveryOrder(updatedOrder);
@@ -2391,19 +2442,6 @@ export default function App() {
     setActiveOrderTab("pending");
     setActiveTab("orders");
     showToast(`สร้างออเดอร์ #${newId} (${typeLabel}) สำเร็จ`, "add_shopping_cart");
-
-    // Automatically push new order alert via LINE API / Webhook to Hnan145
-    void dispatchAutoLineAlert(
-      "new_order",
-      buildNewOrderLineMessage(newOrder, ownerLineId),
-      {
-        orderId: newOrder.id,
-        customerName: newOrder.customerName,
-        orderType: newOrder.orderType || "delivery",
-        totalThb: newOrder.totalThb,
-        itemCount: newOrder.items.length,
-      }
-    );
   };
 
   // --- Accounting Handlers (Owner-only) ---
@@ -2847,6 +2885,41 @@ export default function App() {
     }
   };
 
+  if (!authReady) {
+    return (
+      <div className="min-h-[100dvh] bg-surface text-on-surface flex flex-col items-center justify-center gap-3 px-4 pt-safe pb-safe">
+        <img
+          src="/icon.svg"
+          alt="DenewStock"
+          className="w-16 h-16 rounded-2xl shadow-md border border-outline-variant/40"
+        />
+        <div className="flex items-center gap-2 text-[13.5px] font-semibold text-on-surface-variant">
+          <span className="material-symbols-outlined text-[18px] text-primary animate-spin">
+            progress_activity
+          </span>
+          <span>กำลังตรวจสอบสถานะการเข้าสู่ระบบ...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!cloudUser) {
+    return (
+      <GoogleLoginScreen
+        isSigningIn={cloudStatus === "connecting"}
+        errorMessage={authError}
+        providerDisabled={authProviderDisabled}
+        onSignInWithPassword={handleSignInWithPassword}
+        onRegisterWithPassword={handleRegisterWithPassword}
+        onSignInWithGoogle={handleConnectCloud}
+        onClearError={() => {
+          setAuthError(null);
+          setAuthProviderDisabled(false);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-[100dvh] bg-surface text-on-surface flex flex-col">
       <Header
@@ -2855,15 +2928,11 @@ export default function App() {
         activeTab={activeTab}
         onTabChange={handleTabChange}
         onEnterStaffMode={() =>
-          handleRoleChange("staff", "เข้าสู่โหมดพนักงานแล้ว", "badge")
+          handleRoleChange("staff", "เข้าสู่ระบบโหมดพนักงานแล้ว", "badge")
         }
         onOpenAiChat={() => setAiChatOpen((prev) => !prev)}
         isAiChatOpen={aiChatOpen}
         lowStockProducts={lowStockProducts}
-        ownerLineId={ownerLineId}
-        onNotifyLowStockLine={(items) =>
-          openLowStockLineAlert(items, "สรุปรายการสินค้าใกล้หมด")
-        }
         onSelectLowStockProduct={(prod) => {
           setActiveTab("inventory");
           setEditingProduct(prod);
@@ -2896,10 +2965,16 @@ export default function App() {
         onDeleteNotification={handleDeleteNotification}
         onClearAllNotifications={handleClearAllNotifications}
         cloudStatus={cloudStatus}
-        cloudUserEmail={cloudUser?.email}
+        cloudUserEmail={accountIdentifier}
+        cloudUserName={cloudUser?.displayName}
+        cloudUserPhoto={cloudUser?.photoURL}
         liveStatus={liveStatus}
         onlineDevicesCount={mergedDevices.length}
         onCloudSyncClick={() => setShowMultiDeviceModal(true)}
+        onConnectCloud={() => void handleConnectCloud()}
+        onDisconnectCloud={() => void handleDisconnectCloud()}
+        onSyncAllToCloud={() => void handleSyncAllToGoogleCloud()}
+        isSyncingCloudAll={isSyncingCloudAll}
         isStandalone={pwa.isStandalone}
         onInstallApp={() => void handleTriggerInstallApp()}
       />
@@ -2922,7 +2997,7 @@ export default function App() {
             onSyncOrdersToAccounting={handleSyncOrdersToAccounting}
             onNotify={showToast}
             cloudStatus={cloudStatus}
-            cloudUserEmail={cloudUser?.email}
+            cloudUserEmail={accountIdentifier}
             isSyncingCloudAll={isSyncingCloudAll}
             onConnectCloud={() => void handleConnectCloud()}
             onSyncAllToCloud={() => void handleSyncAllToGoogleCloud()}
@@ -2935,7 +3010,6 @@ export default function App() {
             products={products}
             orders={orders}
             categories={categories}
-            ownerLineId={ownerLineId}
             lastSyncedLabel={liveSyncDisplayLabel}
             liveStatus={liveStatus}
             cloudStatus={cloudStatus}
@@ -2960,9 +3034,6 @@ export default function App() {
             onConfirmPack={handleConfirmPack}
             onMarkReadyToShip={handleMarkReadyToShip}
             onOpenPaymentQr={(order) => setPaymentQrOrder(order)}
-            onNotifyLowStockLine={(items) =>
-              openLowStockLineAlert(items, "รายการสินค้าใกล้หมด/ต้องสั่งเติม")
-            }
             onDeleteOrder={handleDeleteOrder}
             onDeleteProduct={handleDeleteProduct}
           />
@@ -2972,15 +3043,13 @@ export default function App() {
           <InventoryView
             role={role}
             products={products}
+            orders={orders}
             categories={categories}
-            ownerLineId={ownerLineId}
             initialStockFilter={inventoryInitialFilter}
             onConsumeInitialFilter={() => setInventoryInitialFilter(undefined)}
-            onNotifyLowStockLine={(items) =>
-              openLowStockLineAlert(items, "รายการสินค้าใกล้หมด/ต้องสั่งเติม")
-            }
             lastSyncedLabel={liveSyncDisplayLabel}
             onSyncNow={handleSyncNow}
+            onNotify={showToast}
             onQuickCreateOrderForProduct={handleQuickCreateOrderForProduct}
             onNavigateAccounting={() => setActiveTab("accounting")}
             onOpenAddProduct={() => setShowAddProductModal(true)}
@@ -3051,33 +3120,9 @@ export default function App() {
               }
               showToast("เปลี่ยนรหัสผ่านเจ้าของร้านเรียบร้อยแล้ว", "key");
             }}
-            ownerLineId={ownerLineId}
-            onUpdateOwnerLineId={(newLineId) => {
-              setOwnerLineId(newLineId);
-              emitLiveAction("settings:update", { ownerLineId: newLineId });
-              if (cloudUser) {
-                runCloudWrite(
-                  updateWorkspaceSettings(cloudUser.uid, {
-                    ownerLineId: newLineId,
-                  })
-                );
-              }
-              showToast(`อัปเดต LINE ID แจ้งเตือนเป็น "${newLineId}" แล้ว`, "chat");
-            }}
             promptPayId={promptPayId}
             promptPayName={promptPayName}
             onUpdatePromptPayConfig={handleUpdatePromptPayConfig}
-            onTestLineAutoNotify={() =>
-              void dispatchAutoLineAlert(
-                "test",
-                `🔔 [DenewStock] ทดสอบการส่งข้อความแจ้งเตือนอัตโนมัติไปยัง LINE ID: ${ownerLineId} (${new Date().toLocaleTimeString(
-                  "th-TH",
-                  { hour: "2-digit", minute: "2-digit" }
-                )} น.)`,
-                { test: true },
-                true
-              )
-            }
             pendingCount={pendingOrdersCount}
             packingCount={packingOrdersCount}
             readyToShipCount={readyToShipOrdersCount}
@@ -3100,11 +3145,15 @@ export default function App() {
             onClearAllApprovals={handleClearAllApprovals}
             onNotify={showToast}
             cloudStatus={cloudStatus}
-            cloudUserEmail={cloudUser?.email}
+            cloudUserEmail={accountIdentifier}
+            cloudUserName={cloudUser?.displayName}
+            cloudUserPhoto={cloudUser?.photoURL}
+            hasPasswordLogin={hasPasswordLogin}
+            onSetupLoginPassword={handleSetupLoginPassword}
+            onChangeLoginPassword={handleChangeLoginPassword}
             isSyncingCloudAll={isSyncingCloudAll}
             liveStatus={liveStatus}
             onlineDevicesCount={mergedDevices.length}
-            roomId={roomId}
             onOpenMultiDevice={() => setShowMultiDeviceModal(true)}
             onConnectCloud={() => void handleConnectCloud()}
             onDisconnectCloud={() => void handleDisconnectCloud()}
@@ -3147,12 +3196,11 @@ export default function App() {
       {showMultiDeviceModal && (
         <MultiDeviceModal
           liveStatus={liveStatus}
-          roomId={roomId}
           currentDeviceId={deviceId}
           currentDeviceName={deviceName}
           devices={mergedDevices}
           cloudStatus={cloudStatus}
-          cloudUserEmail={cloudUser?.email}
+          cloudUserEmail={accountIdentifier}
           isSyncingCloudAll={isSyncingCloudAll}
           cloudRecordCounts={{
             products: products.length,
@@ -3161,7 +3209,6 @@ export default function App() {
             accounting: accountingEntries.length,
           }}
           onRenameDevice={handleRenameDevice}
-          onChangeRoom={handleChangeRoom}
           onConnectCloud={() => void handleConnectCloud()}
           onDisconnectCloud={() => void handleDisconnectCloud()}
           onSyncAllToCloud={() => void handleSyncAllToGoogleCloud()}
@@ -3185,7 +3232,6 @@ export default function App() {
           product={editingProduct}
           role={role}
           categories={categories}
-          ownerLineId={ownerLineId}
           pendingRequest={
             approvals.find(
               (a) =>
@@ -3253,15 +3299,6 @@ export default function App() {
           }
           onClose={() => setConfirmingDeliveryOrder(null)}
           onConfirm={handleConfirmDelivery}
-        />
-      )}
-
-      {lowStockLineAlert && (
-        <LowStockLineAlertModal
-          products={lowStockLineAlert.products}
-          ownerLineId={ownerLineId}
-          triggerContext={lowStockLineAlert.triggerContext}
-          onClose={() => setLowStockLineAlert(null)}
         />
       )}
 

@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
+import { FIREBASE_AUTH_PROVIDERS_URL } from "../firebase";
 import { RoleMode, StockApprovalRequest } from "../types";
 import {
   normalizePromptPayDigits,
   parsePromptPayTarget,
 } from "../utils/promptpay";
+import { GoogleLogoSvg } from "./GoogleLoginScreen";
+
+export interface PasswordActionResult {
+  ok: boolean;
+  error?: string;
+  providerDisabled?: boolean;
+}
 
 interface OwnerAuthViewProps {
   role: RoleMode;
@@ -11,15 +19,12 @@ interface OwnerAuthViewProps {
   onUpdateOwnerName: (name: string) => void;
   ownerPin: string;
   onChangeOwnerPin: (newPin: string) => void;
-  ownerLineId: string;
-  onUpdateOwnerLineId: (lineId: string) => void;
   promptPayId: string;
   promptPayName: string;
   onUpdatePromptPayConfig: (config: {
     promptPayId: string;
     promptPayName: string;
   }) => void;
-  onTestLineAutoNotify: () => void;
   pendingCount: number;
   packingCount: number;
   readyToShipCount: number;
@@ -35,10 +40,17 @@ interface OwnerAuthViewProps {
   onNotify: (msg: string, icon?: string) => void;
   cloudStatus: "connected" | "connecting" | "local";
   cloudUserEmail?: string | null;
+  cloudUserName?: string | null;
+  cloudUserPhoto?: string | null;
+  hasPasswordLogin?: boolean;
+  onSetupLoginPassword?: (newPassword: string) => Promise<PasswordActionResult>;
+  onChangeLoginPassword?: (
+    currentPassword: string,
+    newPassword: string
+  ) => Promise<PasswordActionResult>;
   isSyncingCloudAll?: boolean;
   liveStatus: "connected" | "connecting" | "reconnecting" | "offline";
   onlineDevicesCount: number;
-  roomId: string;
   onOpenMultiDevice: () => void;
   onConnectCloud: () => void;
   onDisconnectCloud: () => void;
@@ -53,12 +65,9 @@ export function OwnerAuthView({
   onUpdateOwnerName,
   ownerPin,
   onChangeOwnerPin,
-  ownerLineId,
-  onUpdateOwnerLineId,
   promptPayId,
   promptPayName,
   onUpdatePromptPayConfig,
-  onTestLineAutoNotify,
   pendingCount,
   packingCount,
   readyToShipCount,
@@ -74,10 +83,14 @@ export function OwnerAuthView({
   onNotify,
   cloudStatus,
   cloudUserEmail,
+  cloudUserName,
+  cloudUserPhoto,
+  hasPasswordLogin = false,
+  onSetupLoginPassword,
+  onChangeLoginPassword,
   isSyncingCloudAll = false,
   liveStatus,
   onlineDevicesCount,
-  roomId,
   onOpenMultiDevice,
   onConnectCloud,
   onDisconnectCloud,
@@ -89,8 +102,6 @@ export function OwnerAuthView({
   const [selectedTab, setSelectedTab] = useState<RoleMode>("owner");
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(ownerName);
-  const [isEditingLineId, setIsEditingLineId] = useState(false);
-  const [lineIdDraft, setLineIdDraft] = useState(ownerLineId);
   const [isEditingPromptPay, setIsEditingPromptPay] = useState(false);
   const [promptPayIdDraft, setPromptPayIdDraft] = useState(promptPayId);
   const [promptPayNameDraft, setPromptPayNameDraft] = useState(promptPayName);
@@ -111,12 +122,82 @@ export function OwnerAuthView({
   const [confirmPinDraft, setConfirmPinDraft] = useState("");
   const [changePinError, setChangePinError] = useState<string | null>(null);
 
+  // Store Login Settings form state (Owner only)
+  const [showLoginSettings, setShowLoginSettings] = useState(false);
+  const [currentLoginPwd, setCurrentLoginPwd] = useState("");
+  const [newLoginPwd, setNewLoginPwd] = useState("");
+  const [confirmLoginPwd, setConfirmLoginPwd] = useState("");
+  const [showLoginPwdChars, setShowLoginPwdChars] = useState(false);
+  const [loginPwdBusy, setLoginPwdBusy] = useState(false);
+  const [loginPwdError, setLoginPwdError] = useState<string | null>(null);
+  const [loginPwdProviderDisabled, setLoginPwdProviderDisabled] =
+    useState(false);
+
   useEffect(() => {
     if (role === "staff") {
       setPinStatus("กรอกรหัสผ่าน 4 หลักเพื่อเข้าโหมดเจ้าของร้าน");
       setPinStatusType("neutral");
+      setShowLoginSettings(false);
+      setShowChangePin(false);
+      setCurrentLoginPwd("");
+      setNewLoginPwd("");
+      setConfirmLoginPwd("");
+      setLoginPwdError(null);
+      setLoginPwdProviderDisabled(false);
     }
   }, [role, ownerPin]);
+
+  const handleCopyLoginId = async () => {
+    if (!cloudUserEmail) return;
+    try {
+      await navigator.clipboard.writeText(cloudUserEmail);
+      onNotify(`คัดลอกชื่อผู้ใช้ "${cloudUserEmail}" แล้ว`, "content_copy");
+    } catch {
+      onNotify(`ชื่อผู้ใช้สำหรับล็อกอินคือ: ${cloudUserEmail}`, "info");
+    }
+  };
+
+  const handleSaveLoginPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (role !== "owner" || loginPwdBusy) return;
+    setLoginPwdError(null);
+    setLoginPwdProviderDisabled(false);
+
+    if (hasPasswordLogin && currentLoginPwd.length < 6) {
+      setLoginPwdError("กรุณากรอกรหัสผ่านเดิมอย่างน้อย 6 ตัวอักษร");
+      return;
+    }
+    if (newLoginPwd.length < 6 || newLoginPwd.length > 128) {
+      setLoginPwdError("รหัสผ่านใหม่ต้องมีความยาว 6–128 ตัวอักษร");
+      return;
+    }
+    if (newLoginPwd !== confirmLoginPwd) {
+      setLoginPwdError("รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน");
+      return;
+    }
+
+    setLoginPwdBusy(true);
+    try {
+      const result = hasPasswordLogin
+        ? await onChangeLoginPassword?.(currentLoginPwd, newLoginPwd)
+        : await onSetupLoginPassword?.(newLoginPwd);
+
+      if (!result) return;
+      if (result.ok) {
+        setCurrentLoginPwd("");
+        setNewLoginPwd("");
+        setConfirmLoginPwd("");
+        setShowLoginSettings(false);
+      } else {
+        setLoginPwdError(
+          result.error || "ไม่สามารถบันทึกรหัสผ่านเข้าสู่ระบบได้"
+        );
+        setLoginPwdProviderDisabled(Boolean(result.providerDisabled));
+      }
+    } finally {
+      setLoginPwdBusy(false);
+    }
+  };
 
   const handleSaveOwnerName = (e: React.FormEvent) => {
     e.preventDefault();
@@ -483,6 +564,177 @@ export function OwnerAuthView({
                   </div>
                 </div>
 
+                {/* Owner-Only Store Login Settings (Username & Password) */}
+                <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2.5 border border-primary/20">
+                  <div className="flex items-start justify-between gap-2 flex-wrap">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <span className="material-symbols-outlined text-[18px] text-primary mt-0.5 shrink-0">
+                        passkey
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[13px] font-bold text-on-surface">
+                            ตั้งค่าการเข้าสู่ระบบ (Username &amp; Password)
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded-md bg-primary-fixed text-on-primary-fixed text-[10px] font-bold">
+                            เฉพาะเจ้าของร้าน
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-on-surface-variant mt-0.5 leading-snug">
+                          {hasPasswordLogin
+                            ? "เปิดใช้งานล็อกอินด้วยชื่อผู้ใช้และรหัสผ่านแล้ว — สามารถเปลี่ยนรหัสผ่านได้ที่นี่"
+                            : "ตั้งรหัสผ่านให้บัญชีร้านนี้ เพื่อให้เครื่องอื่นเข้าสู่ระบบด้วยชื่อผู้ใช้/อีเมลเดียวกันได้"}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLoginSettings((prev) => !prev);
+                        setLoginPwdError(null);
+                        setLoginPwdProviderDisabled(false);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[11px] font-semibold hover:bg-primary-dim transition-colors cursor-pointer shrink-0"
+                    >
+                      {showLoginSettings
+                        ? "ปิด"
+                        : hasPasswordLogin
+                          ? "เปลี่ยนรหัสผ่านล็อกอิน"
+                          : "ตั้งรหัสผ่านล็อกอิน"}
+                    </button>
+                  </div>
+
+                  {cloudUserEmail && (
+                    <div className="flex items-center justify-between gap-2 bg-surface-container-lowest rounded-lg px-2.5 py-2 border border-outline-variant/40">
+                      <div className="min-w-0">
+                        <p className="text-[10.5px] text-on-surface-variant">
+                          ชื่อผู้ใช้สำหรับเข้าสู่ระบบทุกเครื่อง
+                        </p>
+                        <p className="text-[12.5px] font-bold text-on-surface font-mono truncate">
+                          {cloudUserEmail}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyLoginId()}
+                        className="h-8 px-2.5 rounded-lg bg-surface-container hover:bg-primary-fixed hover:text-on-primary-fixed text-on-surface text-[11px] font-semibold flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">
+                          content_copy
+                        </span>
+                        <span>คัดลอก</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {showLoginSettings && (
+                    <form
+                      onSubmit={(e) => void handleSaveLoginPassword(e)}
+                      className="flex flex-col gap-2.5 pt-2 border-t border-outline-variant/25"
+                    >
+                      {hasPasswordLogin && (
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[11px] font-medium text-on-surface-variant">
+                            รหัสผ่านเข้าสู่ระบบเดิม
+                          </span>
+                          <input
+                            type={showLoginPwdChars ? "text" : "password"}
+                            autoComplete="current-password"
+                            disabled={loginPwdBusy}
+                            value={currentLoginPwd}
+                            onChange={(e) => setCurrentLoginPwd(e.target.value)}
+                            placeholder="กรอกรหัสผ่านเดิมเพื่อยืนยันตัวตน"
+                            className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] text-on-surface focus:outline-none focus:border-primary"
+                          />
+                        </label>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[11px] font-medium text-on-surface-variant">
+                            {hasPasswordLogin
+                              ? "รหัสผ่านเข้าสู่ระบบใหม่"
+                              : "ตั้งรหัสผ่านเข้าสู่ระบบ"}
+                          </span>
+                          <input
+                            type={showLoginPwdChars ? "text" : "password"}
+                            autoComplete="new-password"
+                            disabled={loginPwdBusy}
+                            value={newLoginPwd}
+                            onChange={(e) => setNewLoginPwd(e.target.value)}
+                            placeholder="อย่างน้อย 6 ตัวอักษร"
+                            className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] text-on-surface focus:outline-none focus:border-primary"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[11px] font-medium text-on-surface-variant">
+                            ยืนยันรหัสผ่านอีกครั้ง
+                          </span>
+                          <input
+                            type={showLoginPwdChars ? "text" : "password"}
+                            autoComplete="new-password"
+                            disabled={loginPwdBusy}
+                            value={confirmLoginPwd}
+                            onChange={(e) => setConfirmLoginPwd(e.target.value)}
+                            placeholder="กรอกรหัสผ่านให้ตรงกัน"
+                            className="h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] text-on-surface focus:outline-none focus:border-primary"
+                          />
+                        </label>
+                      </div>
+
+                      <label className="inline-flex items-center gap-1.5 text-[11.5px] text-on-surface-variant cursor-pointer select-none w-fit">
+                        <input
+                          type="checkbox"
+                          checked={showLoginPwdChars}
+                          onChange={(e) =>
+                            setShowLoginPwdChars(e.target.checked)
+                          }
+                          className="accent-primary rounded"
+                        />
+                        <span>แสดงตัวอักษรรหัสผ่าน</span>
+                      </label>
+
+                      {loginPwdError && (
+                        <div className="rounded-lg bg-error-container text-on-error-container px-3 py-2 text-[11.5px] space-y-1">
+                          <p className="font-medium">{loginPwdError}</p>
+                          {loginPwdProviderDisabled && (
+                            <a
+                              href={FIREBASE_AUTH_PROVIDERS_URL}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 font-bold underline"
+                            >
+                              <span>เปิด Email/Password ใน Firebase Console</span>
+                              <span className="material-symbols-outlined text-[13px]">
+                                open_in_new
+                              </span>
+                            </a>
+                          )}
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={loginPwdBusy}
+                        className="h-9 rounded-lg bg-primary text-on-primary text-[12px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer hover:bg-primary-dim disabled:opacity-60"
+                      >
+                        {loginPwdBusy && (
+                          <span className="material-symbols-outlined text-[16px] animate-spin">
+                            progress_activity
+                          </span>
+                        )}
+                        <span>
+                          {loginPwdBusy
+                            ? "กำลังบันทึกรหัสผ่าน..."
+                            : hasPasswordLogin
+                              ? "บันทึกรหัสผ่านล็อกอินใหม่"
+                              : "เปิดใช้งานและบันทึกรหัสผ่านล็อกอิน"}
+                        </span>
+                      </button>
+                    </form>
+                  )}
+                </div>
+
                 {/* Change Owner PIN Section */}
                 <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2.5">
                   <div className="flex items-center justify-between gap-2">
@@ -571,71 +823,6 @@ export function OwnerAuthView({
                         className="h-9 rounded-lg bg-primary text-on-primary text-[12px] font-semibold cursor-pointer hover:bg-primary-dim"
                       >
                         บันทึกรหัสผ่านใหม่
-                      </button>
-                    </form>
-                  )}
-                </div>
-
-                {/* Owner LINE ID Notification Target Setting */}
-                <div className="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="material-symbols-outlined text-[17px] text-[#059642] shrink-0">
-                        chat
-                      </span>
-                      <span className="text-[13px] font-semibold text-on-surface truncate">
-                        LINE แจ้งเตือนอัตโนมัติ:{" "}
-                        <span className="text-[#059642] font-bold">
-                          {ownerLineId}
-                        </span>
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={onTestLineAutoNotify}
-                        className="px-2.5 py-1 rounded-lg bg-[#06C755] text-white text-[11px] font-semibold hover:bg-[#05b34c] transition-colors cursor-pointer"
-                      >
-                        ทดสอบส่ง
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLineIdDraft(ownerLineId);
-                          setIsEditingLineId((prev) => !prev);
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-[#06C755]/15 text-[#059642] text-[11px] font-semibold hover:bg-[#06C755] hover:text-white transition-colors cursor-pointer"
-                      >
-                        {isEditingLineId ? "ปิด" : "เปลี่ยน LINE ID"}
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-on-surface-variant leading-relaxed">
-                    ส่งแจ้งเตือนอัตโนมัติผ่าน API/Webhook ทุกครั้งที่มีออเดอร์ใหม่ อนุมัติแก้ไขสต็อก คำขอปรับสต็อก และสินค้าใกล้หมด
-                  </p>
-                  {isEditingLineId && (
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const cleaned = lineIdDraft.trim();
-                        if (!cleaned) return;
-                        onUpdateOwnerLineId(cleaned);
-                        setIsEditingLineId(false);
-                      }}
-                      className="flex items-center gap-2 pt-1 border-t border-outline-variant/25"
-                    >
-                      <input
-                        type="text"
-                        value={lineIdDraft}
-                        onChange={(e) => setLineIdDraft(e.target.value)}
-                        placeholder="เช่น Hnan145"
-                        className="flex-1 h-9 px-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-[13px] font-medium text-on-surface focus:outline-none focus:border-primary"
-                      />
-                      <button
-                        type="submit"
-                        className="h-9 px-3 rounded-lg bg-[#06C755] text-white text-[12px] font-semibold cursor-pointer hover:bg-[#05b34c]"
-                      >
-                        บันทึก
                       </button>
                     </form>
                   )}
@@ -791,9 +978,6 @@ export function OwnerAuthView({
                             <p className="text-[11px] text-on-surface-variant flex items-center gap-1.5 flex-wrap">
                               <span>
                                 {req.requestedBy} · {req.createdAt}
-                              </span>
-                              <span className="px-1.5 py-0.2 rounded bg-[#06C755]/15 text-[#059642] text-[10px] font-semibold">
-                                LINE: {req.notifiedLineId || ownerLineId}
                               </span>
                             </p>
                           </div>
@@ -981,13 +1165,124 @@ export function OwnerAuthView({
           )}
         </div>
 
-        {/* Right Column: Mobile App Install + Online Cloud Sync + Permission Summary */}
+        {/* Right Column: Google Account + Mobile App Install + Online Cloud Sync + Permission Summary */}
         <div className="lg:col-span-6 flex flex-col gap-3">
+          {/* Google Login Account Card */}
+          <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/40 shadow-sm flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                {cloudUserEmail ? (
+                  <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-primary/35 bg-primary-fixed text-on-primary-fixed font-bold flex items-center justify-center shrink-0">
+                    {cloudUserPhoto ? (
+                      <img
+                        src={cloudUserPhoto}
+                        alt={cloudUserName || cloudUserEmail}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span>
+                        {(cloudUserName || cloudUserEmail).charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-11 h-11 rounded-xl bg-surface-container-low border border-outline-variant/60 flex items-center justify-center shrink-0">
+                    <GoogleLogoSvg className="w-6 h-6" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <h3 className="text-[14.5px] font-bold text-on-surface leading-tight truncate">
+                    {cloudUserEmail
+                      ? cloudUserName || "เข้าสู่ระบบแล้ว"
+                      : "เข้าสู่ระบบบัญชีร้านค้า"}
+                  </h3>
+                  <p className="text-[12px] text-on-surface-variant truncate mt-0.5">
+                    {cloudUserEmail
+                      ? cloudUserEmail
+                      : "ล็อกอินเพื่อบันทึกข้อมูลทุกรายการลง Firebase อัตโนมัติ"}
+                  </p>
+                </div>
+              </div>
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-bold shrink-0 ${
+                  cloudUserEmail
+                    ? "bg-secondary-container text-on-secondary-container"
+                    : "bg-error-container text-on-error-container"
+                }`}
+              >
+                {cloudUserEmail ? "เชื่อมต่อแล้ว" : "ยังไม่ล็อกอิน"}
+              </span>
+            </div>
+
+            {cloudUserEmail ? (
+              <div className="flex flex-col gap-2">
+                {role === "staff" && (
+                  <p className="text-[11.5px] text-on-surface-variant bg-surface-container-low rounded-lg px-2.5 py-2 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[15px] text-primary shrink-0">
+                      lock
+                    </span>
+                    <span>
+                      การตั้งค่าและเปลี่ยนรหัสผ่านเข้าสู่ระบบจำกัดเฉพาะเจ้าของร้านเท่านั้น (กรุณาใส่รหัส PIN เจ้าของร้าน)
+                    </span>
+                  </p>
+                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {onSyncAllToCloud && (
+                    <button
+                      type="button"
+                      disabled={isSyncingCloudAll}
+                      onClick={onSyncAllToCloud}
+                      className="h-10 px-3.5 rounded-xl bg-primary hover:bg-primary-dim text-on-primary text-[12.5px] font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      <span
+                        className={`material-symbols-outlined text-[17px] ${
+                          isSyncingCloudAll ? "animate-spin" : ""
+                        }`}
+                      >
+                        {isSyncingCloudAll ? "progress_activity" : "cloud_sync"}
+                      </span>
+                      <span>
+                        {isSyncingCloudAll
+                          ? "กำลังซิงก์..."
+                          : "ซิงก์ข้อมูลทั้งหมดขึ้น Firebase"}
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onDisconnectCloud}
+                    className="h-10 px-3.5 rounded-xl bg-surface-container hover:bg-error-container hover:text-error text-on-surface text-[12.5px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">
+                      logout
+                    </span>
+                    <span>ออกจากระบบ</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={cloudStatus === "connecting"}
+                onClick={onConnectCloud}
+                className="w-full h-11 px-4 rounded-xl bg-white hover:bg-surface-container-low text-[#1f1f1f] border border-outline-variant shadow-xs font-semibold text-[14px] flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-60"
+              >
+                <GoogleLogoSvg className="w-5 h-5 shrink-0" />
+                <span>
+                  {cloudStatus === "connecting"
+                    ? "กำลังเข้าสู่ระบบด้วย Google..."
+                    : "เข้าสู่ระบบด้วย Google"}
+                </span>
+              </button>
+            )}
+          </div>
+
           {/* Mobile PWA Install Card */}
           <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/40 shadow-sm flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <img
-                src="/pwa-192x192.png"
+                src="/icon.svg"
                 alt="DenewStock"
                 className="w-11 h-11 rounded-xl border border-outline-variant/40 shadow-xs shrink-0"
               />
@@ -1047,11 +1342,7 @@ export function OwnerAuthView({
                   </h3>
                   <p className="text-[12px] text-on-surface-variant truncate">
                     {liveStatus === "connected"
-                      ? `ออนไลน์สด ${onlineDevicesCount} เครื่อง (ห้อง ${roomId})${
-                          cloudStatus === "connected"
-                            ? ` · คลาวด์: ${cloudUserEmail || "Google"}`
-                            : ""
-                        }`
+                      ? `ออนไลน์สด ${onlineDevicesCount} เครื่อง · บัญชี ${cloudUserEmail || "ร้านค้า"}`
                       : cloudStatus === "connected"
                         ? `เชื่อมต่อคลาวด์แล้ว (${cloudUserEmail || "Firebase Cloud"})`
                         : "กำลังเชื่อมต่อซิงก์เรียลไทม์หลายเครื่อง..."}
@@ -1074,7 +1365,7 @@ export function OwnerAuthView({
             </div>
 
             <p className="text-[12px] text-on-surface-variant leading-relaxed">
-              หลายเครื่อง (มือถือพนักงาน แท็บเล็ต โน้ตบุ๊ก) เปิดลิงก์เดียวกันแล้วทำงานพร้อมกันได้ทันทีแบบเรียลไทม์ โดยสต็อก ออเดอร์ การแพ็ค คำขออนุมัติ และบัญชีจะอัปเดตตรงกันทุกเครื่อง และแนะนำให้เชื่อมบัญชี Google อย่างน้อย 1 เครื่องเพื่อสำรองข้อมูลถาวรบนคลาวด์
+              ข้อมูลชุดนี้ถูกล็อกเฉพาะบัญชีเดียวกัน ({cloudUserEmail || "บัญชีร้าน"}) เมื่อเปิดบนเครื่องอื่นให้เข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่านเดียวกัน จะเห็นข้อมูลสต็อก ออเดอร์ การแพ็ค และบัญชีชุดเดียวกันแบบเรียลไทม์ทันที
             </p>
 
             <div className="flex items-center gap-2 flex-wrap">
@@ -1204,7 +1495,7 @@ export function OwnerAuthView({
                     )}
                   </div>
                   <p className="text-[13px] text-on-surface-variant mt-0.5">
-                    ปลดล็อกด้วยรหัสผ่าน 4 หลัก: จัดการระบบบัญชีรายรับ-รายจ่าย, วิเคราะห์กำไรและต้นทุนจริง, อนุมัติ/แก้ไขจำนวนสต็อก และลบข้อมูลได้เต็มรูปแบบ
+                    ปลดล็อกด้วยรหัสผ่าน 4 หลัก: ตั้งค่าการเข้าสู่ระบบและเปลี่ยนรหัสผ่านร้าน, จัดการระบบบัญชีรายรับ-รายจ่าย, วิเคราะห์กำไรและต้นทุนจริง, อนุมัติ/แก้ไขจำนวนสต็อก และลบข้อมูลได้เต็มรูปแบบ
                   </p>
                 </div>
               </div>

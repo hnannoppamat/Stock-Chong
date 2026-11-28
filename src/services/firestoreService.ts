@@ -13,13 +13,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import {
-  INITIAL_ACCOUNTING_ENTRIES,
-  INITIAL_APPROVALS,
   INITIAL_CATEGORIES,
-  INITIAL_CUSTOMERS,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_ORDERS,
-  INITIAL_PRODUCTS,
   LEGACY_DEFAULT_CATEGORIES,
 } from "../data/initialData";
 import { db, handleFirestoreError, OperationType } from "../firebase";
@@ -318,11 +312,6 @@ export async function ensureUserWorkspace(
     seedSnapshot?.ownerPin && /^\d{4}$/.test(seedSnapshot.ownerPin)
       ? seedSnapshot.ownerPin
       : "4145";
-  const seedOwnerLineId = clampString(
-    seedSnapshot?.ownerLineId || "Hnan145",
-    LIMITS.OWNER_LINE_ID_MAX,
-    "Hnan145"
-  );
   const seedCategories =
     seedSnapshot?.categories && seedSnapshot.categories.length > 0
       ? seedSnapshot.categories
@@ -349,7 +338,6 @@ export async function ensureUserWorkspace(
         uid,
         ownerName: seedOwnerName,
         ownerPin: seedOwnerPin,
-        ownerLineId: seedOwnerLineId,
         promptPayId: seedPromptPayId,
         promptPayName: seedPromptPayName,
         roleMode: "staff",
@@ -367,13 +355,13 @@ export async function ensureUserWorkspace(
     handleFirestoreError(error, OperationType.CREATE, workspacePath);
   }
 
-  const seedProducts = seedSnapshot?.products ?? INITIAL_PRODUCTS;
-  const seedCustomers = seedSnapshot?.customers ?? INITIAL_CUSTOMERS;
-  const seedOrders = seedSnapshot?.orders ?? INITIAL_ORDERS;
-  const seedApprovals = seedSnapshot?.approvals ?? INITIAL_APPROVALS;
-  const seedNotifications = seedSnapshot?.notifications ?? INITIAL_NOTIFICATIONS;
-  const seedAccounting =
-    seedSnapshot?.accountingEntries ?? INITIAL_ACCOUNTING_ENTRIES;
+  // Brand-new accounts start with empty store collections unless explicitly provided for this account
+  const seedProducts = seedSnapshot?.products ?? [];
+  const seedCustomers = seedSnapshot?.customers ?? [];
+  const seedOrders = seedSnapshot?.orders ?? [];
+  const seedApprovals = seedSnapshot?.approvals ?? [];
+  const seedNotifications = seedSnapshot?.notifications ?? [];
+  const seedAccounting = seedSnapshot?.accountingEntries ?? [];
 
   const seededProductIds = new Set<string>();
   const seededCustomerIds = new Set<string>();
@@ -488,9 +476,6 @@ export async function ensureUserWorkspace(
         reason: clampString(req.reason, LIMITS.REASON_MAX),
         createdAtLabel: clampString(req.createdAt, LIMITS.LABEL_MAX),
         status: req.status === "pending" ? "pending" : "pending",
-        notifiedLineId: req.notifiedLineId
-          ? req.notifiedLineId.trim().slice(0, LIMITS.OWNER_LINE_ID_MAX)
-          : undefined,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
@@ -690,10 +675,6 @@ export function subscribeApprovals(
           reason: String(data.reason || ""),
           createdAt: String(data.createdAtLabel || ""),
           status: data.status || "pending",
-          notifiedLineId:
-            typeof data.notifiedLineId === "string"
-              ? data.notifiedLineId
-              : undefined,
         };
       });
       onData(list);
@@ -888,7 +869,6 @@ export async function updateWorkspaceSettings(
   updates: Partial<{
     ownerName: string;
     ownerPin: string;
-    ownerLineId: string;
     promptPayId: string;
     promptPayName: string;
     roleMode: RoleMode;
@@ -906,13 +886,6 @@ export async function updateWorkspaceSettings(
   }
   if (updates.ownerPin !== undefined && /^\d{4}$/.test(updates.ownerPin)) {
     clean.ownerPin = updates.ownerPin;
-  }
-  if (updates.ownerLineId !== undefined) {
-    clean.ownerLineId = clampString(
-      updates.ownerLineId,
-      LIMITS.OWNER_LINE_ID_MAX,
-      "Hnan145"
-    );
   }
   if (updates.promptPayId !== undefined) {
     clean.promptPayId = updates.promptPayId.trim().slice(0, LIMITS.PROMPTPAY_ID_MAX);
@@ -1216,9 +1189,6 @@ export async function createApprovalDoc(uid: string, req: StockApprovalRequest) 
         reason: clampString(req.reason, LIMITS.REASON_MAX),
         createdAtLabel: clampString(req.createdAt, LIMITS.LABEL_MAX),
         status: "pending",
-        notifiedLineId: req.notifiedLineId
-          ? req.notifiedLineId.trim().slice(0, LIMITS.OWNER_LINE_ID_MAX)
-          : undefined,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
@@ -1632,9 +1602,6 @@ export async function syncFullWorkspaceToCloud(
   if (snapshot.ownerPin && /^\d{4}$/.test(snapshot.ownerPin)) {
     settingsPatch.ownerPin = snapshot.ownerPin;
   }
-  if (snapshot.ownerLineId && snapshot.ownerLineId.trim()) {
-    settingsPatch.ownerLineId = snapshot.ownerLineId.trim();
-  }
   if (typeof snapshot.promptPayId === "string" && snapshot.promptPayId.trim()) {
     settingsPatch.promptPayId = snapshot.promptPayId.trim();
   }
@@ -1884,9 +1851,6 @@ export async function syncFullWorkspaceToCloud(
             reason: clampString(req.reason, LIMITS.REASON_MAX),
             createdAtLabel: clampString(req.createdAt || "เมื่อสักครู่", LIMITS.LABEL_MAX),
             status: "pending",
-            notifiedLineId: req.notifiedLineId
-              ? req.notifiedLineId.trim().slice(0, LIMITS.OWNER_LINE_ID_MAX)
-              : undefined,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           })

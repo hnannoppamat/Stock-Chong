@@ -284,16 +284,16 @@ export function WeeklySalesChart({
                   <CartesianGrid
                     strokeDasharray="4 4"
                     vertical={false}
-                    stroke="#ffd1e7"
+                    stroke="#e8ddef"
                   />
                   <XAxis
                     dataKey="dayLabel"
-                    tick={{ fill: "#7a445d", fontSize: 12 }}
-                    axisLine={{ stroke: "#f5c2d9" }}
+                    tick={{ fill: "#72617d", fontSize: 12 }}
+                    axisLine={{ stroke: "#e3d6ea" }}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fill: "#7a445d", fontSize: 11 }}
+                    tick={{ fill: "#72617d", fontSize: 11 }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(v: number) =>
@@ -301,14 +301,14 @@ export function WeeklySalesChart({
                     }
                   />
                   <Tooltip
-                    cursor={{ fill: "rgba(225, 29, 116, 0.08)" }}
+                    cursor={{ fill: "rgba(174, 84, 130, 0.08)" }}
                     contentStyle={{
                       backgroundColor: "#ffffff",
-                      borderColor: "#f5c2d9",
+                      borderColor: "#e3d6ea",
                       borderRadius: "12px",
-                      boxShadow: "0 10px 25px rgba(61, 20, 40, 0.12)",
+                      boxShadow: "0 10px 25px rgba(63, 49, 71, 0.10)",
                       fontSize: "12px",
-                      color: "#3d1428",
+                      color: "#3f3147",
                     }}
                     formatter={(value: unknown, name: unknown) => [
                       `฿${Number(value || 0).toLocaleString()}`,
@@ -325,7 +325,7 @@ export function WeeklySalesChart({
                     dataKey="deliverySales"
                     name="ส่งของ (จัดส่ง)"
                     stackId="sales"
-                    fill="#e11d74"
+                    fill="#d884af"
                     radius={[0, 0, 0, 0]}
                     maxBarSize={42}
                   />
@@ -333,8 +333,8 @@ export function WeeklySalesChart({
                     dataKey="walkInSales"
                     name="Walk-in (หน้าร้าน)"
                     stackId="sales"
-                    fill="#facc15"
-                    stroke="#eab308"
+                    fill="#95d5c0"
+                    stroke="#6bb8a0"
                     strokeWidth={1}
                     radius={[6, 6, 0, 0]}
                     maxBarSize={42}
@@ -347,30 +347,30 @@ export function WeeklySalesChart({
                 >
                   <defs>
                     <linearGradient
-                      id="pinkYellowArea"
+                      id="pastelRoseMintArea"
                       x1="0"
                       y1="0"
                       x2="0"
                       y2="1"
                     >
-                      <stop offset="5%" stopColor="#ec4899" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#fef08a" stopOpacity={0.08} />
+                      <stop offset="5%" stopColor="#d884af" stopOpacity={0.34} />
+                      <stop offset="95%" stopColor="#d8f3e9" stopOpacity={0.1} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid
                     strokeDasharray="4 4"
                     vertical={false}
-                    stroke="#ffd1e7"
+                    stroke="#e8ddef"
                   />
                   <XAxis
                     dataKey="dayLabel"
-                    tick={{ fill: "#7a445d", fontSize: 12 }}
-                    axisLine={{ stroke: "#f5c2d9" }}
+                    tick={{ fill: "#72617d", fontSize: 12 }}
+                    axisLine={{ stroke: "#e3d6ea" }}
                     tickLine={false}
                   />
                   <YAxis
                     yAxisId="left"
-                    tick={{ fill: "#7a445d", fontSize: 11 }}
+                    tick={{ fill: "#72617d", fontSize: 11 }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(v: number) =>
@@ -381,18 +381,18 @@ export function WeeklySalesChart({
                     yAxisId="right"
                     orientation="right"
                     allowDecimals={false}
-                    tick={{ fill: "#b86e00", fontSize: 11 }}
+                    tick={{ fill: "#3d7d69", fontSize: 11 }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "#ffffff",
-                      borderColor: "#f5c2d9",
+                      borderColor: "#e3d6ea",
                       borderRadius: "12px",
-                      boxShadow: "0 10px 25px rgba(61, 20, 40, 0.12)",
+                      boxShadow: "0 10px 25px rgba(63, 49, 71, 0.10)",
                       fontSize: "12px",
-                      color: "#3d1428",
+                      color: "#3f3147",
                     }}
                     formatter={(value: unknown, name: unknown) => {
                       const num = Number(value || 0);
@@ -413,18 +413,18 @@ export function WeeklySalesChart({
                     type="monotone"
                     dataKey="totalSales"
                     name="ยอดขายรวม (บาท)"
-                    stroke="#e11d74"
+                    stroke="#ae5482"
                     strokeWidth={2.5}
-                    fill="url(#pinkYellowArea)"
+                    fill="url(#pastelRoseMintArea)"
                   />
                   <Line
                     yAxisId="right"
                     type="monotone"
                     dataKey="orderCount"
                     name="จำนวนออเดอร์"
-                    stroke="#eab308"
+                    stroke="#5ca891"
                     strokeWidth={2.5}
-                    dot={{ r: 4, fill: "#facc15", strokeWidth: 2, stroke: "#b86e00" }}
+                    dot={{ r: 4, fill: "#a3decb", strokeWidth: 2, stroke: "#3d7d69" }}
                     activeDot={{ r: 6 }}
                   />
                 </ComposedChart>

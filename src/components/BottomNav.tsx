@@ -56,7 +56,7 @@ export function BottomNav({
   return (
     <nav
       aria-label="แถบนำทางล่าง"
-      className="md:hidden fixed bottom-0 left-0 right-0 z-50 pb-safe bg-surface/95 backdrop-blur-xl shadow-[0_-2px_14px_rgba(225,29,116,0.08)] border-t border-outline-variant/35 select-none"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-50 pb-safe bg-surface/95 backdrop-blur-xl shadow-[0_-2px_14px_rgba(174,84,130,0.08)] border-t border-outline-variant/35 select-none"
     >
       <div
         className={`grid items-center h-[64px] px-1 ${

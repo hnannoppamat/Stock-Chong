@@ -31,8 +31,8 @@ export default defineConfig(() => {
           lang: 'th',
           display: 'standalone',
           orientation: 'portrait-primary',
-          theme_color: '#e11d74',
-          background_color: '#fff7fb',
+          theme_color: '#ae5482',
+          background_color: '#fbf8fc',
           categories: ['business', 'productivity', 'shopping'],
           icons: [
             {

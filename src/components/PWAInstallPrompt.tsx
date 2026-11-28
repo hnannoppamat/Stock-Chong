@@ -30,7 +30,7 @@ export function PWAInstallGuideModal({
         <div className="px-5 pt-4 pb-3 border-b border-outline-variant/40 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <img
-              src="/pwa-192x192.png"
+              src="/icon.svg"
               alt="ไอคอน DenewStock"
               className="w-11 h-11 rounded-xl shadow-sm border border-outline-variant/40 shrink-0"
             />
@@ -191,7 +191,7 @@ export function PWAInstallBanner({
     >
       <div className="flex items-center gap-3">
         <img
-          src="/pwa-192x192.png"
+          src="/icon.svg"
           alt="DenewStock"
           className="w-10 h-10 rounded-xl shadow-xs border border-outline-variant/40 shrink-0"
         />

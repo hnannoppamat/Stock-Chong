@@ -17,6 +17,10 @@ import {
   ProductItem,
   RoleMode,
 } from "../types";
+import {
+  downloadCsvFile,
+  exportStockAndSalesReportCsv,
+} from "../utils/csvExport";
 import { readImageAsDataUrl, uploadPhoto } from "../utils/image";
 
 interface ScannedBillLineItem {
@@ -564,13 +568,6 @@ export function AccountingView({
       "จำนวนเงิน (บาท)",
       "หมายเหตุ",
     ];
-    const escapeCsv = (val: string | number | undefined) => {
-      const str = String(val ?? "");
-      if (/[",\n]/.test(str)) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
     const rows = ledgerEntries.map((e) => [
       e.date,
       e.type === "income" ? "รายรับ" : "รายจ่าย",
@@ -582,19 +579,19 @@ export function AccountingView({
       e.note || "",
     ]);
 
-    const csvContent =
-      "\uFEFF" +
-      [headers, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `DenewStock-Accounting-${getTodayIso()}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadCsvFile(`DenewStock-Accounting-${getTodayIso()}.csv`, [
+      headers,
+      ...rows,
+    ]);
     onNotify(`ส่งออกรายงานบัญชี (${ledgerEntries.length} รายการ) แล้ว`, "download");
+  };
+
+  const handleExportStockReportCsv = () => {
+    const result = exportStockAndSalesReportCsv(products, orders);
+    onNotify(
+      `ดาวน์โหลดรายงานสต็อกและประวัติการขายแล้ว (สินค้า ${result.productCount} รุ่น, ออเดอร์ ${result.orderCount} รายการ)`,
+      "download"
+    );
   };
 
   const activeCategoryOptions =
@@ -678,13 +675,24 @@ export function AccountingView({
 
           <button
             type="button"
+            onClick={handleExportStockReportCsv}
+            className="h-10 px-3 rounded-xl bg-surface-container-lowest border border-outline-variant/50 text-on-surface hover:bg-surface-container-low text-[12px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+          >
+            <span className="material-symbols-outlined text-[17px] text-secondary">
+              download
+            </span>
+            <span>ดาวน์โหลดรายงานสต็อก (CSV)</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportCsv}
             className="h-10 px-3 rounded-xl bg-surface-container-lowest border border-outline-variant/50 text-on-surface hover:bg-surface-container-low text-[12px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
           >
             <span className="material-symbols-outlined text-[17px]">
-              download
+              table_view
             </span>
-            <span>ส่งออก CSV</span>
+            <span>ส่งออกบัญชี (CSV)</span>
           </button>
         </div>
       </div>
@@ -1509,11 +1517,11 @@ export function AccountingView({
                 </div>
                 <div className="flex items-center gap-3 text-[11px] font-medium text-on-surface-variant">
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-[#16a34a] inline-block" />
+                    <span className="w-2.5 h-2.5 rounded-xs bg-[#68b89e] inline-block" />
                     รายรับ
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-[#e11d74] inline-block" />
+                    <span className="w-2.5 h-2.5 rounded-xs bg-[#d884af] inline-block" />
                     รายจ่าย
                   </span>
                 </div>
@@ -1533,16 +1541,16 @@ export function AccountingView({
                       <CartesianGrid
                         strokeDasharray="3 3"
                         vertical={false}
-                        stroke="rgba(148,163,184,0.22)"
+                        stroke="rgba(184,164,194,0.28)"
                       />
                       <XAxis
                         dataKey="label"
-                        tick={{ fontSize: 11, fill: "#64748b" }}
+                        tick={{ fontSize: 11, fill: "#72617d" }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <YAxis
-                        tick={{ fontSize: 11, fill: "#64748b" }}
+                        tick={{ fontSize: 11, fill: "#72617d" }}
                         axisLine={false}
                         tickLine={false}
                         tickFormatter={(v) =>
@@ -1556,21 +1564,22 @@ export function AccountingView({
                         ]}
                         contentStyle={{
                           borderRadius: 10,
-                          border: "1px solid rgba(148,163,184,0.25)",
+                          border: "1px solid #e3d6ea",
                           fontSize: 12,
+                          color: "#3f3147",
                         }}
                       />
                       <Bar
                         dataKey="income"
                         name="income"
-                        fill="#16a34a"
+                        fill="#68b89e"
                         radius={[4, 4, 0, 0]}
                         maxBarSize={28}
                       />
                       <Bar
                         dataKey="expense"
                         name="expense"
-                        fill="#e11d74"
+                        fill="#d884af"
                         radius={[4, 4, 0, 0]}
                         maxBarSize={28}
                       />

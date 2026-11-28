@@ -7,7 +7,11 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { attachLiveSyncServer } from "./serverLiveSync.ts";
+import {
+  attachLiveSyncServer,
+  roomIdForUid,
+  verifyFirebaseIdToken,
+} from "./serverLiveSync.ts";
 
 dotenv.config();
 
@@ -29,75 +33,6 @@ function getGeminiClient(): GoogleGenAI | null {
       },
     },
   });
-}
-
-const ALLOWED_LINE_EVENTS = new Set([
-  "new_order",
-  "stock_approved",
-  "stock_request",
-  "low_stock",
-  "test",
-]);
-
-function isPrivateOrLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (
-    host === "localhost" ||
-    host === "0.0.0.0" ||
-    host === "::1" ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal")
-  ) {
-    return true;
-  }
-  const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4Match) {
-    const [a, b] = [Number(ipv4Match[1]), Number(ipv4Match[2])];
-    if (
-      a === 10 ||
-      a === 127 ||
-      a === 0 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function getValidatedWebhookUrl(): string | null {
-  const raw = process.env.LINE_WEBHOOK_URL?.trim();
-  if (!raw) return null;
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "https:") return null;
-    if (isPrivateOrLoopbackHost(parsed.hostname)) return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
-function getLineApiConfig(): {
-  lineMessagingApiReady: boolean;
-  webhookReady: boolean;
-  channelAccessToken: string | null;
-  targetUserId: string | null;
-  webhookUrl: string | null;
-} {
-  const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim() || null;
-  const targetUserId = process.env.LINE_TARGET_USER_ID?.trim() || null;
-  const webhookUrl = getValidatedWebhookUrl();
-
-  return {
-    lineMessagingApiReady: Boolean(channelAccessToken && targetUserId),
-    webhookReady: Boolean(webhookUrl),
-    channelAccessToken,
-    targetUserId,
-    webhookUrl,
-  };
 }
 
 async function startServer() {
@@ -993,153 +928,24 @@ async function startServer() {
     }
   });
 
-  app.get("/api/line-notify/status", (_req, res) => {
-    const cfg = getLineApiConfig();
-    res.json({
-      configured: cfg.lineMessagingApiReady || cfg.webhookReady,
-      lineMessagingApiReady: cfg.lineMessagingApiReady,
-      webhookReady: cfg.webhookReady,
-    });
-  });
-
-  app.post("/api/line-notify", async (req, res) => {
-    try {
-      const body = req.body as {
-        eventType?: unknown;
-        targetLineId?: unknown;
-        message?: unknown;
-        metadata?: unknown;
-      };
-
-      const eventType =
-        typeof body.eventType === "string" &&
-        ALLOWED_LINE_EVENTS.has(body.eventType)
-          ? body.eventType
-          : null;
-
-      if (!eventType) {
-        res.status(400).json({ error: "ประเภทเหตุการณ์แจ้งเตือนไม่ถูกต้อง" });
-        return;
-      }
-
-      const message =
-        typeof body.message === "string" ? body.message.trim().slice(0, 2000) : "";
-
-      if (!message) {
-        res.status(400).json({ error: "กรุณาระบุข้อความแจ้งเตือน" });
-        return;
-      }
-
-      const targetLineId =
-        typeof body.targetLineId === "string" && body.targetLineId.trim()
-          ? body.targetLineId.trim().slice(0, 64)
-          : "Hnan145";
-
-      const safeMetadata =
-        body.metadata &&
-        typeof body.metadata === "object" &&
-        !Array.isArray(body.metadata)
-          ? Object.fromEntries(
-              Object.entries(body.metadata as Record<string, unknown>)
-                .slice(0, 12)
-                .filter(
-                  ([, v]) =>
-                    typeof v === "string" ||
-                    typeof v === "number" ||
-                    typeof v === "boolean"
-                )
-            )
-          : {};
-
-      const cfg = getLineApiConfig();
-      if (!cfg.lineMessagingApiReady && !cfg.webhookReady) {
-        res.json({
-          delivered: false,
-          configured: false,
-          channels: [],
-          targetLineId,
-        });
-        return;
-      }
-
-      const deliveredChannels: string[] = [];
-      const errors: string[] = [];
-
-      // 1. Official LINE Messaging API Push (server-side secret token)
-      if (cfg.lineMessagingApiReady && cfg.channelAccessToken && cfg.targetUserId) {
-        try {
-          const lineRes = await fetch("https://api.line.me/v2/bot/message/push", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${cfg.channelAccessToken}`,
-            },
-            body: JSON.stringify({
-              to: cfg.targetUserId,
-              messages: [{ type: "text", text: message }],
-            }),
-            signal: AbortSignal.timeout(8000),
-          });
-          if (lineRes.ok) {
-            deliveredChannels.push("line_messaging_api");
-          } else {
-            errors.push(`LINE API status ${lineRes.status}`);
-          }
-        } catch {
-          errors.push("LINE API request failed");
-        }
-      }
-
-      // 2. Configured HTTPS Webhook Bridge (e.g. Make / Zapier / n8n / Apps Script)
-      if (cfg.webhookReady && cfg.webhookUrl) {
-        try {
-          const whRes = await fetch(cfg.webhookUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              source: "DenewStock",
-              eventType,
-              targetLineId,
-              message,
-              metadata: safeMetadata,
-              timestamp: new Date().toISOString(),
-            }),
-            signal: AbortSignal.timeout(8000),
-          });
-          if (whRes.ok) {
-            deliveredChannels.push("webhook");
-          } else {
-            errors.push(`Webhook status ${whRes.status}`);
-          }
-        } catch {
-          errors.push("Webhook request failed");
-        }
-      }
-
-      res.json({
-        delivered: deliveredChannels.length > 0,
-        configured: true,
-        channels: deliveredChannels,
-        targetLineId,
-        ...(errors.length > 0 && deliveredChannels.length === 0
-          ? { error: "ไม่สามารถส่งข้อความไปยังปลายทาง LINE ได้ในขณะนี้" }
-          : {}),
-      });
-    } catch {
-      res.status(500).json({ error: "เกิดข้อผิดพลาดในการส่งแจ้งเตือน LINE" });
-    }
-  });
-
   const httpServer = http.createServer(app);
   const liveSync = await attachLiveSyncServer(httpServer);
 
   app.get("/api/live/status", async (req, res) => {
     try {
-      const roomParam =
-        typeof req.query.room === "string" ? req.query.room : undefined;
-      const status = await liveSync.getRoomStatus(roomParam);
+      const authHeader = req.header("authorization") || "";
+      const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7).trim()
+        : "";
+      const verified = await verifyFirebaseIdToken(token);
+      if (!verified) {
+        res.status(401).json({
+          ok: false,
+          error: "กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อดูสถานะการซิงก์",
+        });
+        return;
+      }
+      const status = await liveSync.getRoomStatus(roomIdForUid(verified.uid));
       res.json(status);
     } catch {
       res.status(500).json({ ok: false, error: "ไม่สามารถดึงสถานะห้องซิงก์ได้" });
@@ -1149,7 +955,10 @@ async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ws: { server: httpServer },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);

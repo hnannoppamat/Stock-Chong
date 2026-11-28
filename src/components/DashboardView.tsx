@@ -16,7 +16,6 @@ interface DashboardViewProps {
   products: ProductItem[];
   orders: Order[];
   categories: string[];
-  ownerLineId: string;
   lastSyncedLabel: string;
   liveStatus: LiveConnectionStatus;
   cloudStatus: "connected" | "connecting" | "local";
@@ -38,7 +37,6 @@ interface DashboardViewProps {
   onConfirmPack: (orderId: string) => void;
   onMarkReadyToShip: (orderId: string) => void;
   onOpenPaymentQr: (order: Order) => void;
-  onNotifyLowStockLine: (items: ProductItem[]) => void;
   onDeleteOrder: (orderId: string) => void;
   onDeleteProduct: (productId: string) => void;
 }
@@ -105,7 +103,6 @@ export function DashboardView({
   products,
   orders,
   categories,
-  ownerLineId,
   lastSyncedLabel,
   liveStatus,
   cloudStatus,
@@ -127,7 +124,6 @@ export function DashboardView({
   onConfirmPack,
   onMarkReadyToShip,
   onOpenPaymentQr,
-  onNotifyLowStockLine,
   onDeleteOrder,
   onDeleteProduct,
 }: DashboardViewProps) {
@@ -268,8 +264,6 @@ export function DashboardView({
         role={role}
         orders={orders}
         products={products}
-        ownerLineId={ownerLineId}
-        onNotifyLowStockLine={onNotifyLowStockLine}
         onNavigateOrdersWithTab={onNavigateOrdersWithTab}
         onSelectProductForEdit={onSelectProductForEdit}
         onQuickCreateOrderForProduct={onQuickCreateOrderForProduct}

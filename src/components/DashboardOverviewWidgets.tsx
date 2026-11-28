@@ -6,8 +6,6 @@ interface DashboardOverviewWidgetsProps {
   role: RoleMode;
   orders: Order[];
   products: ProductItem[];
-  ownerLineId: string;
-  onNotifyLowStockLine: (items: ProductItem[]) => void;
   onNavigateOrdersWithTab: (tab: OrderStatus) => void;
   onSelectProductForEdit: (product: ProductItem) => void;
   onQuickCreateOrderForProduct: (product: ProductItem) => void;
@@ -137,8 +135,6 @@ export function DashboardOverviewWidgets({
   role,
   orders,
   products,
-  ownerLineId,
-  onNotifyLowStockLine,
   onNavigateOrdersWithTab,
   onSelectProductForEdit,
   onQuickCreateOrderForProduct,
@@ -420,17 +416,6 @@ export function DashboardOverviewWidgets({
                   );
                 })}
               </div>
-
-              <button
-                type="button"
-                onClick={() => onNotifyLowStockLine(alertProducts)}
-                className="h-9 px-3 rounded-lg bg-[#06C755] hover:bg-[#05b34c] text-white text-[12px] font-semibold flex items-center gap-1 shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <span className="material-symbols-outlined text-[16px]">
-                  chat
-                </span>
-                <span>แจ้งเตือน LINE ({ownerLineId})</span>
-              </button>
 
               <button
                 type="button"
@@ -1102,21 +1087,6 @@ export function DashboardOverviewWidgets({
                         add_shopping_cart
                       </span>
                       <span>สร้างคำสั่งซื้อ</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const prod = selectedAlertProduct;
-                        setSelectedAlertProductId(null);
-                        onNotifyLowStockLine([prod]);
-                      }}
-                      className="h-10 px-3 rounded-lg bg-[#06C755] hover:bg-[#05b34c] text-white text-[12px] font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">
-                        chat
-                      </span>
-                      <span>แจ้ง LINE ({ownerLineId})</span>
                     </button>
 
                     {role === "owner" && (
